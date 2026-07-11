@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AYWindowTypes.h"
+#include "AYInputTypes.h"
 
 #include <cstdint>
 #include <memory>
@@ -36,6 +37,12 @@ public:
     void setWindowResizeCallback(WindowResizeCallback callback);
     void setWindowFocusCallback(WindowFocusCallback callback);
     void setWindowMessageCallback(WindowMessageCallback callback);
+
+    // Raw input callbacks. DeviceManager wires these into keyboard/mouse devices.
+    void setKeyCallback(KeyCallback callback);
+    void setMouseButtonCallback(MouseButtonCallback callback);
+    void setMouseMoveCallback(MouseMoveCallback callback);
+    void setMouseWheelCallback(MouseWheelCallback callback);
 
     // Explicit notification (SDL bridge / tests without native message pump).
     void notifyClosed();

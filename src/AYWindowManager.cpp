@@ -62,6 +62,11 @@ struct WindowManager::Impl {
     WindowResizeCallback onResize;
     WindowFocusCallback onFocus;
     WindowMessageCallback onMessage;
+
+    KeyCallback onKey;
+    MouseButtonCallback onMouseButton;
+    MouseMoveCallback onMouseMove;
+    MouseWheelCallback onMouseWheel;
 #endif
 
 #if defined(AY_DEVICE_USE_SDL2)
@@ -126,6 +131,90 @@ void readClientSize(HWND hwnd, int& width, int& height)
     GetClientRect(hwnd, &rect);
     width  = rect.right - rect.left;
     height = rect.bottom - rect.top;
+}
+
+// Translate a Win32 virtual-key code (with WM_KEYDOWN lParam for extended-key
+// and scancode disambiguation) into a backend-agnostic KeyCode.
+KeyCode translateVirtualKey(WPARAM vk, LPARAM lParam)
+{
+    const bool extended = (lParam & (1 << 24)) != 0;
+    const UINT scancode = static_cast<UINT>((lParam >> 16) & 0xFF);
+
+    // Letters A-Z share ASCII codes with virtual keys.
+    if (vk >= 'A' && vk <= 'Z') {
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::A) + (vk - 'A'));
+    }
+    // Top-row digits 0-9.
+    if (vk >= '0' && vk <= '9') {
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::Num0) + (vk - '0'));
+    }
+    // Function keys F1-F12.
+    if (vk >= VK_F1 && vk <= VK_F12) {
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::F1) + (vk - VK_F1));
+    }
+    // Keypad digits.
+    if (vk >= VK_NUMPAD0 && vk <= VK_NUMPAD9) {
+        return static_cast<KeyCode>(static_cast<int>(KeyCode::Kp0) + (vk - VK_NUMPAD0));
+    }
+
+    switch (vk) {
+    case VK_ESCAPE:    return KeyCode::Escape;
+    case VK_RETURN:    return extended ? KeyCode::KpEnter : KeyCode::Enter;
+    case VK_TAB:       return KeyCode::Tab;
+    case VK_SPACE:     return KeyCode::Space;
+    case VK_BACK:      return KeyCode::Backspace;
+    case VK_INSERT:    return KeyCode::Insert;
+    case VK_DELETE:    return KeyCode::Delete;
+    case VK_HOME:      return KeyCode::Home;
+    case VK_END:       return KeyCode::End;
+    case VK_PRIOR:     return KeyCode::PageUp;
+    case VK_NEXT:      return KeyCode::PageDown;
+
+    case VK_LEFT:      return KeyCode::Left;
+    case VK_RIGHT:     return KeyCode::Right;
+    case VK_UP:        return KeyCode::Up;
+    case VK_DOWN:      return KeyCode::Down;
+
+    case VK_SHIFT: {
+        // Resolve left/right via scancode.
+        const UINT mapped = MapVirtualKeyW(scancode, MAPVK_VSC_TO_VK_EX);
+        return mapped == VK_RSHIFT ? KeyCode::RightShift : KeyCode::LeftShift;
+    }
+    case VK_LSHIFT:    return KeyCode::LeftShift;
+    case VK_RSHIFT:    return KeyCode::RightShift;
+    case VK_CONTROL:   return extended ? KeyCode::RightControl : KeyCode::LeftControl;
+    case VK_LCONTROL:  return KeyCode::LeftControl;
+    case VK_RCONTROL:  return KeyCode::RightControl;
+    case VK_MENU:      return extended ? KeyCode::RightAlt : KeyCode::LeftAlt;
+    case VK_LMENU:     return KeyCode::LeftAlt;
+    case VK_RMENU:     return KeyCode::RightAlt;
+    case VK_LWIN:      return KeyCode::LeftSuper;
+    case VK_RWIN:      return KeyCode::RightSuper;
+
+    case VK_OEM_MINUS:  return KeyCode::Minus;
+    case VK_OEM_PLUS:   return KeyCode::Equal;
+    case VK_OEM_4:      return KeyCode::LeftBracket;
+    case VK_OEM_6:      return KeyCode::RightBracket;
+    case VK_OEM_5:      return KeyCode::Backslash;
+    case VK_OEM_1:      return KeyCode::Semicolon;
+    case VK_OEM_7:      return KeyCode::Apostrophe;
+    case VK_OEM_COMMA:  return KeyCode::Comma;
+    case VK_OEM_PERIOD: return KeyCode::Period;
+    case VK_OEM_2:      return KeyCode::Slash;
+    case VK_OEM_3:      return KeyCode::GraveAccent;
+
+    case VK_DECIMAL:    return KeyCode::KpDecimal;
+    case VK_DIVIDE:     return KeyCode::KpDivide;
+    case VK_MULTIPLY:   return KeyCode::KpMultiply;
+    case VK_SUBTRACT:   return KeyCode::KpSubtract;
+    case VK_ADD:        return KeyCode::KpAdd;
+
+    case VK_CAPITAL:    return KeyCode::CapsLock;
+    case VK_NUMLOCK:    return KeyCode::NumLock;
+    case VK_SCROLL:     return KeyCode::ScrollLock;
+
+    default:            return KeyCode::Unknown;
+    }
 }
 
 } // namespace
@@ -436,6 +525,50 @@ void WindowManager::setWindowMessageCallback(WindowMessageCallback callback)
     }
 }
 
+void WindowManager::setKeyCallback(KeyCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onKey = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setMouseButtonCallback(MouseButtonCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onMouseButton = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setMouseMoveCallback(MouseMoveCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onMouseMove = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setMouseWheelCallback(MouseWheelCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onMouseWheel = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
 bool WindowManager::createChildWindow(const ChildWindowDesc& desc, void*& outHandle)
 {
     outHandle = nullptr;
@@ -534,6 +667,73 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
     case WM_KILLFOCUS:
         notifyFocused(false);
         break;
+
+    // ===== Keyboard =====
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (_impl->onKey) {
+            const bool repeat = (lParam & (1 << 30)) != 0;  // bit 30 = previous key state
+            if (!repeat) {
+                _impl->onKey(translateVirtualKey(wParam, lParam), true);
+            }
+        }
+        break;
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
+        if (_impl->onKey) {
+            _impl->onKey(translateVirtualKey(wParam, lParam), false);
+        }
+        break;
+
+    // ===== Mouse move =====
+    case WM_MOUSEMOVE:
+        if (_impl->onMouseMove) {
+            const int x = static_cast<short>(LOWORD(lParam));
+            const int y = static_cast<short>(HIWORD(lParam));
+            _impl->onMouseMove(static_cast<float>(x), static_cast<float>(y));
+        }
+        break;
+
+    // ===== Mouse buttons =====
+    case WM_LBUTTONDOWN:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Left, true); }
+        break;
+    case WM_LBUTTONUP:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Left, false); }
+        break;
+    case WM_RBUTTONDOWN:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Right, true); }
+        break;
+    case WM_RBUTTONUP:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Right, false); }
+        break;
+    case WM_MBUTTONDOWN:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Middle, true); }
+        break;
+    case WM_MBUTTONUP:
+        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Middle, false); }
+        break;
+    case WM_XBUTTONDOWN:
+        if (_impl->onMouseButton) {
+            const MouseButton btn = (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
+            _impl->onMouseButton(btn, true);
+        }
+        break;
+    case WM_XBUTTONUP:
+        if (_impl->onMouseButton) {
+            const MouseButton btn = (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
+            _impl->onMouseButton(btn, false);
+        }
+        break;
+
+    // ===== Mouse wheel (normalized to notches) =====
+    case WM_MOUSEWHEEL:
+        if (_impl->onMouseWheel) {
+            const short raw = static_cast<short>(HIWORD(wParam));
+            _impl->onMouseWheel(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
+        }
+        break;
+
     default:
         break;
     }

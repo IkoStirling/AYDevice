@@ -1,5 +1,8 @@
 # AYDevice Design
 
+> **文档状态（2026-07-11）**：Phase-1 已落地（`WindowManager` + `DeviceManager::pollEvents`）；Phase-2 已落地（`KeyboardDevice` / `MouseDevice` + `InputMapping` Action/Axis）。
+> **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
+
 ## 1. 概述
 
 AYDevice 是 AY Engine 的**设备子系统**，负责：
@@ -61,6 +64,41 @@ AYDevice 是 AY Engine 的**设备子系统**，负责：
 │                         └──────────────────┘                │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### 1.3 与 AYInput 的关系（锁定 2026-07-11）
+
+**结论：不建设独立 `AYInput` 模块；与 AYDevice 不存在并行实现。**
+
+| 项 | 决策 |
+|----|------|
+| **`AYRuntime/AYInput/`** | **废弃** — 仓库内仅空 `.git/` 占位，无 CMake/头文件/实现；**不要**新建该目录下的输入库 |
+| **输入能力归属** | 全部在 **AYDevice**：原始设备轮询 → `InputMapping`（Action/Axis）→ `InputState` 快照 |
+| **GameLoop 子系统** | **`DeviceSubSystem` 唯一** — 每帧 `pollEvents` + 更新 `InputState`；**取消**独立的 `InputSubSystem` 概念（见 `AYApplication/design.md` §3.2） |
+| **消费方** | `AYUI` EventBridge、`AYScript` `InputProvider`、`AYEditor` Play 路由 — 均读 **AYDevice** 的 Action/状态 API，不直连 SDL/Win32 |
+| **Logia `input.is_pressed("jump")`** | 字符串 = **Action 名**（如 `"jump"`），由 `InputMapping` 绑定物理键；映射表可走 `AYConfig` `[Input.Actions]` 或项目 JSON |
+
+**分层（避免重复造轮子）**：
+
+```
+平台 (SDL2 / Win32 message pump)
+    → AYDevice 原始设备 (KeyboardDevice / MouseDevice / …)
+    → InputMapping (Action "Jump" → Space / Gamepad_A)
+    → InputState / query API
+    → 消费方 (AYUI / Logia / Editor)
+```
+
+**实现分期**（与 §12 一致）：
+
+| Phase | AYDevice 交付 | 备注 |
+|-------|---------------|------|
+| **Phase-1（当前）** | `WindowManager` + `pollEvents`（窗口事件） | 无键盘/映射 |
+| **Phase-2** | `KeyboardDevice` + `MouseDevice` + `InputMapping` | Logia INT-02 依赖此阶段 |
+| **Phase-3+** | Gamepad / Touch / XR / InputProfile | 按需 |
+
+**明确不做**：
+
+- 平行的 `AYInput` 静态库或第二套 Action 映射表
+- 在 `AYScript` / `AYUI` 内嵌 SDL 键盘轮询（必须经 AYDevice）
 
 ---
 
@@ -955,13 +993,15 @@ AYDevice/
 
 ## 12. 实现优先级
 
+> **子系统**：仅注册 **`DeviceSubSystem`**（窗口 + 输入轮询 + 映射更新），不注册 `InputSubSystem`。
+
 ### Phase 1: 核心
-- [ ] WindowManager (SDL2 窗口)
-- [ ] IInputDevice 基类
-- [ ] KeyboardDevice (SDL2)
-- [ ] MouseDevice (SDL2)
-- [ ] DeviceManager
-- [ ] InputMapping (Action/Axis)
+- [x] WindowManager (SDL2 窗口)
+- [x] IInputDevice 基类
+- [x] KeyboardDevice (SDL2)
+- [x] MouseDevice (SDL2)
+- [x] DeviceManager
+- [x] InputMapping (Action/Axis)
 
 ### Phase 2: 手柄 + VR
 - [ ] GamepadDevice (SDL2 Gamepad API)
@@ -989,3 +1029,12 @@ AYDevice/
 - [OpenXR-SDK-Source](https://github.com/KhronosGroup/OpenXR-SDK-Source)
 - Unreal Engine Input System
 - Unity Input System
+
+---
+
+## 14. 变更记录
+
+| 日期 | 变更 |
+|------|------|
+| 2026-07-11 | **§1.3**：锁定 AYInput 废弃、输入栈统一归属 AYDevice；`DeviceSubSystem` 替代 `InputSubSystem` |
+| 2026-07-11 | **Phase-2 落地**：`KeyboardDevice` / `MouseDevice`（帧边沿检测）+ `InputMapping`（Action/Axis）+ Win32 键鼠消息翻译，`DeviceManager` 集成键鼠与映射查询 |

@@ -30,8 +30,45 @@ bool DeviceManager::initialize(const DeviceConfig& config)
         return false;
     }
 
+    _keyboardEnabled = config.enableKeyboard;
+    _mouseEnabled = config.enableMouse;
+
+    _mapping.setKeyboard(_keyboardEnabled ? &_keyboard : nullptr);
+    _mapping.setMouse(_mouseEnabled ? &_mouse : nullptr);
+
+    wireInputCallbacks();
+
     _initialized = true;
     return true;
+}
+
+void DeviceManager::wireInputCallbacks()
+{
+    if (_keyboardEnabled) {
+        _windowManager.setKeyCallback([this](KeyCode key, bool pressed) {
+            if (pressed) {
+                _keyboard.onKeyDown(key);
+            } else {
+                _keyboard.onKeyUp(key);
+            }
+        });
+    }
+
+    if (_mouseEnabled) {
+        _windowManager.setMouseButtonCallback([this](MouseButton button, bool pressed) {
+            if (pressed) {
+                _mouse.onButtonDown(button);
+            } else {
+                _mouse.onButtonUp(button);
+            }
+        });
+        _windowManager.setMouseMoveCallback([this](float x, float y) {
+            _mouse.onMove(x, y);
+        });
+        _windowManager.setMouseWheelCallback([this](float delta) {
+            _mouse.onWheel(delta);
+        });
+    }
 }
 
 void DeviceManager::shutdown()
@@ -41,6 +78,10 @@ void DeviceManager::shutdown()
     }
 
     _windowManager.destroyWindow();
+    _keyboard.reset();
+    _mouse.reset();
+    _keyboardEnabled = false;
+    _mouseEnabled = false;
     _initialized = false;
 }
 
@@ -48,6 +89,15 @@ void DeviceManager::pollEvents()
 {
     if (!_initialized) {
         return;
+    }
+
+    // Advance edge state before draining events so just-pressed / deltas are
+    // measured relative to the previous frame.
+    if (_keyboardEnabled) {
+        _keyboard.newFrame();
+    }
+    if (_mouseEnabled) {
+        _mouse.newFrame();
     }
 
 #if defined(AY_DEVICE_USE_SDL2)

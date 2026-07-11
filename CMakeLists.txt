@@ -5,6 +5,9 @@ project(AYDevice)
 set(SOURCES
     src/AYWindowManager.cpp
     src/AYDeviceManager.cpp
+    src/AYKeyboardDevice.cpp
+    src/AYMouseDevice.cpp
+    src/AYInputMapping.cpp
 )
 
 set(HEADERS
@@ -12,6 +15,11 @@ set(HEADERS
     include/AYWindowTypes.h
     include/AYWindowManager.h
     include/AYDeviceManager.h
+    include/AYInputTypes.h
+    include/AYInputDevice.h
+    include/AYKeyboardDevice.h
+    include/AYMouseDevice.h
+    include/AYInputMapping.h
 )
 
 add_library(${PROJECT_NAME} STATIC ${SOURCES} ${HEADERS})
