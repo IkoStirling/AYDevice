@@ -1,6 +1,6 @@
 # AYDevice Design
 
-> **文档状态（2026-07-11）**：Phase-1 已落地（`WindowManager` + `DeviceManager::pollEvents`）；Phase-2 已落地（`KeyboardDevice` / `MouseDevice` + `InputMapping` Action/Axis）；Phase-3 手柄已落地（`GamepadDevice` XInput + 手柄按钮/摇杆映射 + 震动）；Phase-3 输入配置已落地（`InputProfile` 可重绑定 + AYConfig `[Input.*]` 存档桥接）；Phase-3 触控 + IME 文本已落地（`TouchDevice` `WM_TOUCH` + `TextInput` `WM_CHAR`/`WM_IME_COMPOSITION`）。
+> **文档状态（2026-07-11）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
 > **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
 
 ## 1. 概述
@@ -93,7 +93,8 @@ AYDevice 是 AY Engine 的**设备子系统**，负责：
 |-------|---------------|------|
 | **Phase-1（当前）** | `WindowManager` + `pollEvents`（窗口事件） | 无键盘/映射 |
 | **Phase-2** | `KeyboardDevice` + `MouseDevice` + `InputMapping` | Logia INT-02 依赖此阶段 |
-| **Phase-3+** | Gamepad / Touch / XR / InputProfile | 按需 |
+| **Phase-3** | Gamepad(XInput) / Touch(WM_TOUCH) / TextInput(IME) / InputProfile(+AYConfig) | **已完成**（除 XR） |
+| **未来增强** | XR (OpenXR) | 依赖 AYRenderer XR 呈现 + headset，见 §7 |
 
 **明确不做**：
 
@@ -503,6 +504,14 @@ private:
 ---
 
 ## 7. VR 支持 (OpenXR)
+
+> **状态（2026-07-11）：已移入「未来引擎增强项」，不在当前开发进程内。**
+>
+> 原因：OpenXR 与其余输入设备不同量级——它需要独占 frame loop（`xrWaitFrame`/`xrBeginFrame`/`xrEndFrame`），`xrCreateSession` **强依赖图形后端绑定**（D3D11/Vulkan device），且必须和 AYRenderer 的 swapchain 呈现路径交织（§7.3 的 `acquireSwapchainImage`/`submitFrame`）。当前 AYRenderer 仍在 bgfx 阶段，无 XR 呈现路径；且无 headset runtime 时 `xrGetSystem` 即失败，无法端到端验证。
+>
+> **前置条件（满足后再启动）**：① AYRenderer 具备 XR swapchain 双眼呈现；② 有可用 headset runtime（SteamVR/Oculus/WMR）用于验证。届时 `openxr-loader`（vcpkg 端口 1.1.54 可用）经 `AY_DEVICE_USE_OPENXR` 开关引入。
+>
+> 本节 §7.1–§7.4 为**目标接口设计存档**，非当前待办。
 
 ### 7.1 OpenXR 简介
 
@@ -1005,8 +1014,8 @@ AYDevice/
 
 ### Phase 2: 手柄 + VR
 - [x] GamepadDevice (XInput 后端；SDL2 Gamepad API 待补)
-- [ ] XRDevice (OpenXR)
-- [ ] HapticFeedback
+- [~] XRDevice (OpenXR) — **移入未来引擎增强项**，见 §7 状态说明（依赖 AYRenderer XR 呈现 + headset）
+- [ ] HapticFeedback（手柄震动已在 `GamepadDevice::setVibration`；独立 HapticFeedback 抽象待做）
 
 ### Phase 3: 扩展
 - [x] TouchDevice（Win32 `WM_TOUCH`；SDL2 Touch 待补）
@@ -1041,3 +1050,4 @@ AYDevice/
 | 2026-07-11 | **Phase-3 手柄落地**：`GamepadDevice`（XInput，最多 4 槽；摇杆死区归一化、扳机、按钮边沿、震动）+ `InputMapping` 手柄按钮/模拟轴源，`DeviceManager` 每帧轮询手柄槽位 |
 | 2026-07-11 | **Phase-3 输入配置落地**：`InputProfile`（token 化可重绑定 + `applyTo(InputMapping)`）+ `AYInputNames`（枚举↔字符串）+ AYConfig 桥接 `AYInputProfileConfig`（`Input.*` dot-key，独立 `AYDeviceConfig` 目标，核心库不引 AYConfig） |
 | 2026-07-11 | **Phase-3 触控 + IME 落地**：`TouchDevice`（`WM_TOUCH` 多点、帧 phase/delta、`RegisterTouchWindow`）+ `TextInput`（`WM_CHAR` 代理对→UTF-8 + `WM_IME_COMPOSITION` 组合串，`imm32`），`DeviceManager` 集成 `touch()`/`textInput()` |
+| 2026-07-11 | **XR 决策**：OpenXR 移入「未来引擎增强项」，退出当前进程。前置依赖：AYRenderer XR swapchain 呈现 + 可用 headset runtime。`openxr-loader` vcpkg 端口(1.1.54)可用但未安装；接口设计存档于 §7。 |
