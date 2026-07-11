@@ -7,6 +7,7 @@ add_executable(${TEST_NAME}
     Test_Gamepad.cpp
     Test_InputProfile.cpp
     Test_InputProfileConfig.cpp
+    Test_TouchText.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE

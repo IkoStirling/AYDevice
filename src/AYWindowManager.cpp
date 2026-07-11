@@ -12,6 +12,7 @@
 #    define NOMINMAX
 #  endif
 #  include <Windows.h>
+#  include <imm.h>
 #endif
 
 #if defined(AY_DEVICE_USE_SDL2)
@@ -41,6 +42,22 @@ std::wstring utf8ToWide(const std::string& text)
     return wide;
 }
 
+std::string wideToUtf8(const wchar_t* text, int wcharCount)
+{
+    if (text == nullptr || wcharCount <= 0) {
+        return {};
+    }
+    const int needed = WideCharToMultiByte(CP_UTF8, 0, text, wcharCount,
+                                            nullptr, 0, nullptr, nullptr);
+    if (needed <= 0) {
+        return {};
+    }
+    std::string utf8(static_cast<size_t>(needed), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, text, wcharCount, utf8.data(), needed,
+                        nullptr, nullptr);
+    return utf8;
+}
+
 WindowManager* windowFromHwnd(HWND hwnd)
 {
     return reinterpret_cast<WindowManager*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -67,6 +84,15 @@ struct WindowManager::Impl {
     MouseButtonCallback onMouseButton;
     MouseMoveCallback onMouseMove;
     MouseWheelCallback onMouseWheel;
+
+    TouchCallback onTouch;
+    CharCallback onChar;
+    CompositionCallback onComposition;
+    bool touchEnabled = false;
+    bool touchRegistered = false;
+
+    // WM_CHAR delivers UTF-16; a leading high surrogate is held until its pair.
+    wchar_t pendingHighSurrogate = 0;
 #endif
 
 #if defined(AY_DEVICE_USE_SDL2)
@@ -308,6 +334,13 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
     readClientSize(hwnd, _impl->width, _impl->height);
     _impl->resizable = info.resizable;
 
+    // Apply a touch-enable request made before the window existed.
+    if (_impl->touchEnabled && !_impl->touchRegistered) {
+        if (RegisterTouchWindow(hwnd, 0)) {
+            _impl->touchRegistered = true;
+        }
+    }
+
     if (info.hidden) {
         ShowWindow(hwnd, SW_HIDE);
     } else {
@@ -342,9 +375,14 @@ void WindowManager::destroyWindow()
     }
 #elif defined(_WIN32)
     if (_impl->hwnd != nullptr) {
+        if (_impl->touchRegistered) {
+            UnregisterTouchWindow(_impl->hwnd);
+            _impl->touchRegistered = false;
+        }
         DestroyWindow(_impl->hwnd);
         _impl->hwnd = nullptr;
     }
+    _impl->pendingHighSurrogate = 0;
 #endif
 
     _impl->valid = false;
@@ -569,6 +607,62 @@ void WindowManager::setMouseWheelCallback(MouseWheelCallback callback)
 #endif
 }
 
+void WindowManager::setTouchCallback(TouchCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onTouch = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setCharCallback(CharCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onChar = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setCompositionCallback(CompositionCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onComposition = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+void WindowManager::setTouchEnabled(bool enabled)
+{
+#if defined(_WIN32)
+    if (!_impl) {
+        return;
+    }
+    _impl->touchEnabled = enabled;
+    if (_impl->hwnd == nullptr) {
+        return;  // applied on next createWindow via ensureTouchRegistration
+    }
+    if (enabled && !_impl->touchRegistered) {
+        if (RegisterTouchWindow(_impl->hwnd, 0)) {
+            _impl->touchRegistered = true;
+        }
+    } else if (!enabled && _impl->touchRegistered) {
+        UnregisterTouchWindow(_impl->hwnd);
+        _impl->touchRegistered = false;
+    }
+#else
+    (void)enabled;
+#endif
+}
+
 bool WindowManager::createChildWindow(const ChildWindowDesc& desc, void*& outHandle)
 {
     outHandle = nullptr;
@@ -731,6 +825,88 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
         if (_impl->onMouseWheel) {
             const short raw = static_cast<short>(HIWORD(wParam));
             _impl->onMouseWheel(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
+        }
+        break;
+
+    // ===== Touch (WM_TOUCH: decode contacts, map to client space) =====
+    case WM_TOUCH:
+        if (_impl->onTouch && _impl->hwnd != nullptr) {
+            const UINT count = LOWORD(wParam);
+            if (count > 0) {
+                std::vector<TOUCHINPUT> inputs(count);
+                auto handle = reinterpret_cast<HTOUCHINPUT>(lParam);
+                if (GetTouchInputInfo(handle, count, inputs.data(), sizeof(TOUCHINPUT))) {
+                    for (const TOUCHINPUT& ti : inputs) {
+                        // TOUCHINPUT coordinates are in 0.01 px screen units.
+                        POINT pt{ti.x / 100, ti.y / 100};
+                        ScreenToClient(_impl->hwnd, &pt);
+
+                        TouchPhase phase = TouchPhase::Moved;
+                        if (ti.dwFlags & TOUCHEVENTF_DOWN) {
+                            phase = TouchPhase::Began;
+                        } else if (ti.dwFlags & TOUCHEVENTF_UP) {
+                            phase = TouchPhase::Ended;
+                        }
+                        _impl->onTouch(static_cast<int64_t>(ti.dwID),
+                                       static_cast<float>(pt.x),
+                                       static_cast<float>(pt.y),
+                                       phase);
+                    }
+                    CloseTouchInputHandle(handle);
+                }
+            }
+        }
+        break;
+
+    // ===== Text: committed characters (UTF-16 -> UTF-8, surrogate-aware) =====
+    case WM_CHAR:
+        if (_impl->onChar) {
+            const wchar_t unit = static_cast<wchar_t>(wParam);
+            if (unit >= 0xD800 && unit <= 0xDBFF) {
+                _impl->pendingHighSurrogate = unit;  // wait for low surrogate
+            } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+                if (_impl->pendingHighSurrogate != 0) {
+                    const wchar_t pair[2] = {_impl->pendingHighSurrogate, unit};
+                    const std::string utf8 = wideToUtf8(pair, 2);
+                    _impl->pendingHighSurrogate = 0;
+                    if (!utf8.empty()) {
+                        _impl->onChar(utf8.c_str(), static_cast<int>(utf8.size()));
+                    }
+                }
+            } else if (unit >= 0x20 || unit == L'\t' || unit == L'\n' || unit == L'\r') {
+                // Skip other control chars (backspace/escape stay on the key path).
+                const std::string utf8 = wideToUtf8(&unit, 1);
+                if (!utf8.empty()) {
+                    _impl->onChar(utf8.c_str(), static_cast<int>(utf8.size()));
+                }
+            }
+        }
+        break;
+
+    // ===== IME composition (in-progress candidate string) =====
+    case WM_IME_COMPOSITION:
+        if (_impl->onComposition && _impl->hwnd != nullptr && (lParam & GCS_COMPSTR)) {
+            HIMC himc = ImmGetContext(_impl->hwnd);
+            if (himc != nullptr) {
+                const LONG bytes = ImmGetCompositionStringW(himc, GCS_COMPSTR, nullptr, 0);
+                if (bytes > 0) {
+                    std::wstring wide(static_cast<size_t>(bytes) / sizeof(wchar_t), L'\0');
+                    ImmGetCompositionStringW(himc, GCS_COMPSTR, wide.data(), bytes);
+                    const LONG cursor = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
+                    const std::string utf8 = wideToUtf8(wide.data(), static_cast<int>(wide.size()));
+                    _impl->onComposition(utf8.c_str(), static_cast<int>(utf8.size()),
+                                         static_cast<int>(cursor));
+                } else {
+                    _impl->onComposition("", 0, 0);
+                }
+                ImmReleaseContext(_impl->hwnd, himc);
+            }
+        }
+        break;
+
+    case WM_IME_ENDCOMPOSITION:
+        if (_impl->onComposition) {
+            _impl->onComposition(nullptr, -1, 0);  // sentinel: composition ended
         }
         break;
 

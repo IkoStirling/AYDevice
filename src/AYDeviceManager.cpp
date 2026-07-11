@@ -33,10 +33,15 @@ bool DeviceManager::initialize(const DeviceConfig& config)
     _keyboardEnabled = config.enableKeyboard;
     _mouseEnabled = config.enableMouse;
     _gamepadEnabled = config.enableGamepad;
+    _touchEnabled = config.enableTouch;
 
     _mapping.setKeyboard(_keyboardEnabled ? &_keyboard : nullptr);
     _mapping.setMouse(_mouseEnabled ? &_mouse : nullptr);
     _mapping.setGamepad(_gamepadEnabled ? &_gamepads[0] : nullptr);
+
+    if (_touchEnabled) {
+        _windowManager.setTouchEnabled(true);
+    }
 
     wireInputCallbacks();
 
@@ -71,6 +76,24 @@ void DeviceManager::wireInputCallbacks()
             _mouse.onWheel(delta);
         });
     }
+
+    if (_touchEnabled) {
+        _windowManager.setTouchCallback([this](int64_t id, float x, float y, TouchPhase phase) {
+            _touch.onTouch(id, x, y, phase);
+        });
+    }
+
+    // Text/IME is always wired; TextInput itself gates on setEnabled().
+    _windowManager.setCharCallback([this](const char* utf8, int byteCount) {
+        _textInput.onChar(utf8, byteCount);
+    });
+    _windowManager.setCompositionCallback([this](const char* utf8, int byteCount, int cursor) {
+        if (utf8 == nullptr && byteCount < 0) {
+            _textInput.endComposition();
+        } else {
+            _textInput.onComposition(utf8, byteCount, cursor);
+        }
+    });
 }
 
 GamepadDevice* DeviceManager::gamepad(int slot)
@@ -101,9 +124,12 @@ void DeviceManager::shutdown()
     for (GamepadDevice& pad : _gamepads) {
         pad.reset();
     }
+    _touch.reset();
+    _textInput.reset();
     _keyboardEnabled = false;
     _mouseEnabled = false;
     _gamepadEnabled = false;
+    _touchEnabled = false;
     _initialized = false;
 }
 
@@ -126,6 +152,10 @@ void DeviceManager::pollEvents()
             pad.newFrame();
         }
     }
+    if (_touchEnabled) {
+        _touch.newFrame();
+    }
+    _textInput.newFrame();
 
 #if defined(AY_DEVICE_USE_SDL2)
     SDL_Event event{};

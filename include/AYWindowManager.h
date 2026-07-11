@@ -44,6 +44,15 @@ public:
     void setMouseMoveCallback(MouseMoveCallback callback);
     void setMouseWheelCallback(MouseWheelCallback callback);
 
+    // Touch + text/IME callbacks. Touch requires enableTouch (registers the
+    // window for WM_TOUCH); text is always available once wired.
+    void setTouchCallback(TouchCallback callback);
+    void setCharCallback(CharCallback callback);
+    void setCompositionCallback(CompositionCallback callback);
+
+    // Enable WM_TOUCH delivery for the main window (Win32 RegisterTouchWindow).
+    void setTouchEnabled(bool enabled);
+
     // Explicit notification (SDL bridge / tests without native message pump).
     void notifyClosed();
     void notifyResized(int width, int height);

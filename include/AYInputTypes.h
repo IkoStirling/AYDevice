@@ -111,11 +111,41 @@ enum class GamepadAxis : uint8_t {
 inline constexpr int kGamepadAxisCount = static_cast<int>(GamepadAxis::Count);
 inline constexpr int kMaxGamepads = 4;  // XInput supports up to 4 controllers
 
+// Lifecycle phase of a single touch point within a frame.
+enum class TouchPhase : uint8_t {
+    Began = 0,   // pressed this frame
+    Moved,       // still down, position updated
+    Stationary,  // still down, no movement this frame
+    Ended,       // lifted this frame
+    Cancelled,   // system aborted the touch this frame
+
+    Count
+};
+
+inline constexpr int kMaxTouchPoints = 10;  // typical multi-touch ceiling
+
+// A single active touch point (window client coordinates).
+struct TouchPoint {
+    int64_t    id = -1;         // stable id for the touch's lifetime
+    Vector2    position{};      // current position
+    Vector2    delta{};         // movement since last frame
+    float      pressure = 0.0f; // 0..1 where reported; 1.0 if unknown/down
+    TouchPhase phase = TouchPhase::Ended;
+};
+
 // Raw input callbacks emitted by WindowManager as the platform pump translates
 // native events. DeviceManager wires these into the concrete devices.
 using KeyCallback = std::function<void(KeyCode key, bool pressed)>;
 using MouseButtonCallback = std::function<void(MouseButton button, bool pressed)>;
 using MouseMoveCallback = std::function<void(float x, float y)>;
 using MouseWheelCallback = std::function<void(float delta)>;
+
+// Touch: one call per active contact per WM_TOUCH message.
+using TouchCallback = std::function<void(int64_t id, float x, float y, TouchPhase phase)>;
+
+// Text input: committed UTF-8 text (WM_CHAR / IME result) and in-progress IME
+// composition string (WM_IME_COMPOSITION), both already UTF-8 encoded.
+using CharCallback = std::function<void(const char* utf8, int byteCount)>;
+using CompositionCallback = std::function<void(const char* utf8, int byteCount, int cursor)>;
 
 } // namespace ayt::device

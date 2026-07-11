@@ -5,6 +5,8 @@
 #include "AYKeyboardDevice.h"
 #include "AYMouseDevice.h"
 #include "AYGamepadDevice.h"
+#include "AYTouchDevice.h"
+#include "AYTextInput.h"
 #include "AYInputMapping.h"
 
 #include <array>
@@ -21,7 +23,7 @@ struct DeviceConfig {
 };
 
 // Phase-2: keyboard/mouse + action/axis mapping.
-// Phase-3: gamepads (XInput, up to kMaxGamepads slots polled each frame).
+// Phase-3: gamepads (XInput), touch (WM_TOUCH), and text/IME (WM_CHAR / IME).
 class DeviceManager {
 public:
     DeviceManager();
@@ -49,6 +51,15 @@ public:
     GamepadDevice* gamepad(int slot = 0);
     const GamepadDevice* gamepad(int slot = 0) const;
 
+    // Touch device (null when enableTouch was false).
+    TouchDevice* touch() { return _touchEnabled ? &_touch : nullptr; }
+    const TouchDevice* touch() const { return _touchEnabled ? &_touch : nullptr; }
+
+    // Text/IME input. Always present; disabled by default — call
+    // textInput().setEnabled(true) when a text field takes focus.
+    TextInput& textInput() { return _textInput; }
+    const TextInput& textInput() const { return _textInput; }
+
     InputMapping& mapping() { return _mapping; }
     const InputMapping& mapping() const { return _mapping; }
 
@@ -67,12 +78,15 @@ private:
     bool _keyboardEnabled = false;
     bool _mouseEnabled = false;
     bool _gamepadEnabled = false;
+    bool _touchEnabled = false;
 
     WindowManager  _windowManager;
     KeyboardDevice _keyboard;
     MouseDevice    _mouse;
     std::array<GamepadDevice, kMaxGamepads> _gamepads{
         GamepadDevice{0}, GamepadDevice{1}, GamepadDevice{2}, GamepadDevice{3}};
+    TouchDevice    _touch;
+    TextInput      _textInput;
     InputMapping   _mapping;
 };
 

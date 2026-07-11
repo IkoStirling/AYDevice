@@ -53,6 +53,12 @@ Input.AxesScale.MoveX  = 1.5
 Values go through Config's string/float API — human-readable and layerable
 (Engine default → User override) in both JSON and INI.
 
+## Phase-3 (touch + text/IME)
+
+- `TouchDevice` — multi-touch contacts with per-frame phases (`Began` / `Moved` / `Stationary` / `Ended` / `Cancelled`), accumulated deltas, and a primary-contact helper. Fed from Win32 `WM_TOUCH` (window registered via `RegisterTouchWindow`, gated on `DeviceConfig::enableTouch`).
+- `TextInput` — committed UTF-8 text (`WM_CHAR`, surrogate-pair aware) plus in-progress IME composition string (`WM_IME_COMPOSITION`, via `imm32`). Gated by `setEnabled()` so game keybinds don't double-fire while a text field has focus; `onCommit` / `onCompositionUpdate` callbacks for live UI.
+- `DeviceManager` — `touch()` accessor (null unless enabled) and always-present `textInput()`; `pollEvents()` advances their frame state alongside the other devices.
+
 Default backend is **Win32** on Windows. Optional SDL2 via CMake:
 
 ```cmake

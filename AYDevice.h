@@ -8,6 +8,8 @@
 #include "include/AYKeyboardDevice.h"
 #include "include/AYMouseDevice.h"
 #include "include/AYGamepadDevice.h"
+#include "include/AYTouchDevice.h"
+#include "include/AYTextInput.h"
 #include "include/AYInputMapping.h"
 #include "include/AYInputNames.h"
 #include "include/AYInputProfile.h"
