@@ -8,6 +8,7 @@ add_executable(${TEST_NAME}
     Test_InputProfile.cpp
     Test_InputProfileConfig.cpp
     Test_TouchText.cpp
+    Test_DeviceSubSystem.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE
@@ -17,6 +18,7 @@ target_include_directories(${TEST_NAME} PRIVATE
 target_link_libraries(${TEST_NAME} PRIVATE
     AYDevice
     AYDeviceConfig
+    AYDeviceSubSystem
     AYTest
 )
 

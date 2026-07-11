@@ -1,6 +1,6 @@
 # AYDevice Design
 
-> **文档状态（2026-07-11）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
+> **文档状态（2026-07-11）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）+ `DeviceSubSystem`（GameLoop 集成，独立 `AYDeviceSubSystem` 目标）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
 > **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
 
 ## 1. 概述
@@ -1051,3 +1051,4 @@ AYDevice/
 | 2026-07-11 | **Phase-3 输入配置落地**：`InputProfile`（token 化可重绑定 + `applyTo(InputMapping)`）+ `AYInputNames`（枚举↔字符串）+ AYConfig 桥接 `AYInputProfileConfig`（`Input.*` dot-key，独立 `AYDeviceConfig` 目标，核心库不引 AYConfig） |
 | 2026-07-11 | **Phase-3 触控 + IME 落地**：`TouchDevice`（`WM_TOUCH` 多点、帧 phase/delta、`RegisterTouchWindow`）+ `TextInput`（`WM_CHAR` 代理对→UTF-8 + `WM_IME_COMPOSITION` 组合串，`imm32`），`DeviceManager` 集成 `touch()`/`textInput()` |
 | 2026-07-11 | **XR 决策**：OpenXR 移入「未来引擎增强项」，退出当前进程。前置依赖：AYRenderer XR swapchain 呈现 + 可用 headset runtime。`openxr-loader` vcpkg 端口(1.1.54)可用但未安装；接口设计存档于 §7。 |
+| 2026-07-11 | **GameLoop 集成落地**：`DeviceSubSystem`（"Device" 子系统，priority 0 / Unscaled；`initialize`→建窗+设备，`update`→`pollEvents`，`shutdown`→拆除）+ `setBootstrapConfig`/`registerSubSystem`/`findRegistered`（静态库安全显式注册，仿 `RendererSubSystem`）。独立 `AYDeviceSubSystem` 目标，核心库不引 AYGameLoop。 |

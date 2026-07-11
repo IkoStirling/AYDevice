@@ -59,6 +59,40 @@ Values go through Config's string/float API — human-readable and layerable
 - `TextInput` — committed UTF-8 text (`WM_CHAR`, surrogate-pair aware) plus in-progress IME composition string (`WM_IME_COMPOSITION`, via `imm32`). Gated by `setEnabled()` so game keybinds don't double-fire while a text field has focus; `onCommit` / `onCompositionUpdate` callbacks for live UI.
 - `DeviceManager` — `touch()` accessor (null unless enabled) and always-present `textInput()`; `pollEvents()` advances their frame state alongside the other devices.
 
+## GameLoop integration (DeviceSubSystem)
+
+`DeviceSubSystem` (separate `AYDeviceSubSystem` target) wraps `DeviceManager` as
+a GameLoop `ISubSystem`:
+
+- Registered as **"Device"** at **priority 0** (initializes and updates first, so
+  input is polled before gameplay/physics/UI read it), **Unscaled** time so input
+  and window events keep flowing while paused.
+- `initialize()` creates the window + devices from a bootstrap `DeviceConfig`;
+  `update()` calls `pollEvents()` once per frame; `shutdown()` tears down.
+- Static-lib-safe explicit registration (mirrors `RendererSubSystem`), not the
+  `REGISTER_SUBSYSTEM` auto-init macro.
+
+```cpp
+#include "AYDeviceSubSystem.h"
+using namespace ayt::device;
+
+DeviceConfig config{};
+config.window.title = "Game";
+DeviceSubSystem::setBootstrapConfig(config);   // before GameLoop::run()
+DeviceSubSystem::registerSubSystem();
+
+// Other subsystems fetch the polled devices:
+if (auto* dev = DeviceSubSystem::findRegistered()) {
+    bool jump = dev->manager().isActionPressed("Jump");
+    void* hwnd = dev->manager().window().getWindowHandle();  // -> RendererSubSystem
+}
+```
+
+Kept in a separate target so the core `AYDevice` library stays free of the
+`AYGameLoop` dependency — the editor uses `DeviceManager` directly without the loop.
+
+## Backend
+
 Default backend is **Win32** on Windows. Optional SDL2 via CMake:
 
 ```cmake

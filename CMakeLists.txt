@@ -79,4 +79,25 @@ target_compile_options(AYDeviceConfig PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
 )
 
+# ===== AYDeviceSubSystem =====
+# GameLoop integration: wraps DeviceManager as a "Device" ISubSystem. Kept in a
+# separate target so the core AYDevice library stays free of the AYGameLoop
+# dependency (the editor uses DeviceManager directly without the loop).
+add_library(AYDeviceSubSystem STATIC
+    src/AYDeviceSubSystem.cpp
+    include/AYDeviceSubSystem.h
+)
+
+target_include_directories(AYDeviceSubSystem PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop)
+
+target_compile_options(AYDeviceSubSystem PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>: /W4>
+    $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
+)
+
 add_subdirectory(unittest)
