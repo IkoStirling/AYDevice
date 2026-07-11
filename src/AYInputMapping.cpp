@@ -2,6 +2,7 @@
 
 #include "AYKeyboardDevice.h"
 #include "AYMouseDevice.h"
+#include "AYGamepadDevice.h"
 
 namespace ayt::device {
 
@@ -17,6 +18,12 @@ void InputMapping::bindActionMouse(std::string_view action, std::span<const Mous
     binding.buttons.assign(buttons.begin(), buttons.end());
 }
 
+void InputMapping::bindActionGamepad(std::string_view action, std::span<const GamepadButton> buttons)
+{
+    ActionBinding& binding = _actions[std::string(action)];
+    binding.gamepadButtons.assign(buttons.begin(), buttons.end());
+}
+
 void InputMapping::clearAction(std::string_view action)
 {
     _actions.erase(std::string(action));
@@ -27,6 +34,12 @@ void InputMapping::bindAxis(std::string_view axis, std::span<const KeyPair> pair
     AxisBinding& binding = _axes[std::string(axis)];
     binding.pairs.assign(pairs.begin(), pairs.end());
     binding.scale = scale;
+}
+
+void InputMapping::bindAxisGamepad(std::string_view axis, GamepadAxis gamepadAxis, float scale)
+{
+    AxisBinding& binding = _axes[std::string(axis)];
+    binding.gamepadAxes.push_back(GamepadAxisSource{gamepadAxis, scale});
 }
 
 void InputMapping::clearAxis(std::string_view axis)
@@ -66,6 +79,13 @@ bool InputMapping::isActionPressed(std::string_view action) const
             }
         }
     }
+    if (_gamepad != nullptr) {
+        for (GamepadButton button : binding->gamepadButtons) {
+            if (_gamepad->isButtonPressed(button)) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
@@ -85,6 +105,13 @@ bool InputMapping::isActionJustPressed(std::string_view action) const
     if (_mouse != nullptr) {
         for (MouseButton button : binding->buttons) {
             if (_mouse->isButtonJustPressed(button)) {
+                return true;
+            }
+        }
+    }
+    if (_gamepad != nullptr) {
+        for (GamepadButton button : binding->gamepadButtons) {
+            if (_gamepad->isButtonJustPressed(button)) {
                 return true;
             }
         }
@@ -112,32 +139,58 @@ bool InputMapping::isActionJustReleased(std::string_view action) const
             }
         }
     }
+    if (_gamepad != nullptr) {
+        for (GamepadButton button : binding->gamepadButtons) {
+            if (_gamepad->isButtonJustReleased(button)) {
+                return true;
+            }
+        }
+    }
     return false;
 }
 
 float InputMapping::getAxisValue(std::string_view axis) const
 {
     const AxisBinding* binding = findAxis(axis);
-    if (binding == nullptr || _keyboard == nullptr) {
+    if (binding == nullptr) {
         return 0.0f;
     }
 
     float value = 0.0f;
-    for (const KeyPair& pair : binding->pairs) {
-        if (pair.positive != KeyCode::Unknown && _keyboard->isKeyPressed(pair.positive)) {
-            value += 1.0f;
+    if (_keyboard != nullptr) {
+        float keyValue = 0.0f;
+        for (const KeyPair& pair : binding->pairs) {
+            if (pair.positive != KeyCode::Unknown && _keyboard->isKeyPressed(pair.positive)) {
+                keyValue += 1.0f;
+            }
+            if (pair.negative != KeyCode::Unknown && _keyboard->isKeyPressed(pair.negative)) {
+                keyValue -= 1.0f;
+            }
         }
-        if (pair.negative != KeyCode::Unknown && _keyboard->isKeyPressed(pair.negative)) {
-            value -= 1.0f;
+        // Clamp the digital sum before applying scale; scale may exceed 1.
+        if (keyValue > 1.0f) {
+            keyValue = 1.0f;
+        } else if (keyValue < -1.0f) {
+            keyValue = -1.0f;
         }
+        value += keyValue * binding->scale;
     }
 
-    if (value > 1.0f) {
-        value = 1.0f;
-    } else if (value < -1.0f) {
-        value = -1.0f;
+    if (_gamepad != nullptr && !binding->gamepadAxes.empty()) {
+        float gamepadValue = 0.0f;
+        for (const GamepadAxisSource& source : binding->gamepadAxes) {
+            gamepadValue += _gamepad->getAxis(source.axis) * source.scale;
+        }
+        // Combined analog sources clamp to the normalized range.
+        if (gamepadValue > 1.0f) {
+            gamepadValue = 1.0f;
+        } else if (gamepadValue < -1.0f) {
+            gamepadValue = -1.0f;
+        }
+        value += gamepadValue;
     }
-    return value * binding->scale;
+
+    return value;
 }
 
 bool InputMapping::hasAction(std::string_view action) const

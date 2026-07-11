@@ -32,9 +32,11 @@ bool DeviceManager::initialize(const DeviceConfig& config)
 
     _keyboardEnabled = config.enableKeyboard;
     _mouseEnabled = config.enableMouse;
+    _gamepadEnabled = config.enableGamepad;
 
     _mapping.setKeyboard(_keyboardEnabled ? &_keyboard : nullptr);
     _mapping.setMouse(_mouseEnabled ? &_mouse : nullptr);
+    _mapping.setGamepad(_gamepadEnabled ? &_gamepads[0] : nullptr);
 
     wireInputCallbacks();
 
@@ -71,6 +73,22 @@ void DeviceManager::wireInputCallbacks()
     }
 }
 
+GamepadDevice* DeviceManager::gamepad(int slot)
+{
+    if (!_gamepadEnabled || slot < 0 || slot >= kMaxGamepads) {
+        return nullptr;
+    }
+    return &_gamepads[slot];
+}
+
+const GamepadDevice* DeviceManager::gamepad(int slot) const
+{
+    if (!_gamepadEnabled || slot < 0 || slot >= kMaxGamepads) {
+        return nullptr;
+    }
+    return &_gamepads[slot];
+}
+
 void DeviceManager::shutdown()
 {
     if (!_initialized) {
@@ -80,8 +98,12 @@ void DeviceManager::shutdown()
     _windowManager.destroyWindow();
     _keyboard.reset();
     _mouse.reset();
+    for (GamepadDevice& pad : _gamepads) {
+        pad.reset();
+    }
     _keyboardEnabled = false;
     _mouseEnabled = false;
+    _gamepadEnabled = false;
     _initialized = false;
 }
 
@@ -98,6 +120,11 @@ void DeviceManager::pollEvents()
     }
     if (_mouseEnabled) {
         _mouse.newFrame();
+    }
+    if (_gamepadEnabled) {
+        for (GamepadDevice& pad : _gamepads) {
+            pad.newFrame();
+        }
     }
 
 #if defined(AY_DEVICE_USE_SDL2)
@@ -134,6 +161,13 @@ void DeviceManager::pollEvents()
         DispatchMessageW(&msg);
     }
 #endif
+
+    // Gamepads are polled (XInput), not event-driven.
+    if (_gamepadEnabled) {
+        for (GamepadDevice& pad : _gamepads) {
+            pad.poll();
+        }
+    }
 }
 
 } // namespace ayt::device

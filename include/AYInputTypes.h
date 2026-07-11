@@ -73,6 +73,44 @@ enum class MouseButton : uint8_t {
 
 inline constexpr int kMouseButtonCount = static_cast<int>(MouseButton::Count);
 
+// Gamepad buttons (Xbox layout; XInput / SDL map their native codes to these).
+enum class GamepadButton : uint8_t {
+    A = 0,
+    B,
+    X,
+    Y,
+    LeftBumper,
+    RightBumper,
+    Back,
+    Start,
+    Guide,
+    LeftStick,   // left stick click (L3)
+    RightStick,  // right stick click (R3)
+    DpadUp,
+    DpadDown,
+    DpadLeft,
+    DpadRight,
+
+    Count
+};
+
+inline constexpr int kGamepadButtonCount = static_cast<int>(GamepadButton::Count);
+
+// Gamepad analog axes (sticks normalized -1..1, triggers 0..1).
+enum class GamepadAxis : uint8_t {
+    LeftX = 0,
+    LeftY,
+    RightX,
+    RightY,
+    LeftTrigger,
+    RightTrigger,
+
+    Count
+};
+
+inline constexpr int kGamepadAxisCount = static_cast<int>(GamepadAxis::Count);
+inline constexpr int kMaxGamepads = 4;  // XInput supports up to 4 controllers
+
 // Raw input callbacks emitted by WindowManager as the platform pump translates
 // native events. DeviceManager wires these into the concrete devices.
 using KeyCallback = std::function<void(KeyCode key, bool pressed)>;

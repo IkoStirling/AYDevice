@@ -7,4 +7,5 @@
 #include "include/AYInputDevice.h"
 #include "include/AYKeyboardDevice.h"
 #include "include/AYMouseDevice.h"
+#include "include/AYGamepadDevice.h"
 #include "include/AYInputMapping.h"

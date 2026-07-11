@@ -17,6 +17,13 @@ Device subsystem for AY Engine: **window + input** (single module). Input mappin
 - `DeviceManager` — owns keyboard/mouse/mapping; `pollEvents()` advances frame edges then drains the platform pump
 - Win32 message → `KeyCode` / `MouseButton` translation wired through `WindowManager` input callbacks
 
+## Phase-3 (gamepad)
+
+- `GamepadDevice` — XInput backend, up to 4 slots; sticks (deadzoned, normalized -1..1), triggers (0..1), buttons with per-frame edges, and rumble (`setVibration` / `stopVibration`)
+- `InputMapping` — Action bindings extended with gamepad buttons; Axis bindings extended with gamepad analog axes (summed with keyboard, gamepad portion clamped)
+- `DeviceManager` — `gamepad(slot)` accessor; `pollEvents()` polls all slots each frame (XInput is polled, not event-driven)
+- Event-feed API (`setConnected` / `onButtonDown` / `setAxis`) lets the devices and mapping be unit-tested without hardware
+
 Default backend is **Win32** on Windows. Optional SDL2 via CMake:
 
 ```cmake
@@ -43,10 +50,18 @@ devices.mapping().bindAction("Jump", jump);
 ayt::device::InputMapping::KeyPair moveX[] = {{ ayt::device::KeyCode::A, ayt::device::KeyCode::D }};
 devices.mapping().bindAxis("MoveX", moveX);
 
+// Gamepad (Phase-3)
+ayt::device::GamepadButton jumpPad[] = { ayt::device::GamepadButton::A };
+devices.mapping().bindActionGamepad("Jump", jumpPad);
+devices.mapping().bindAxisGamepad("MoveX", ayt::device::GamepadAxis::LeftX);
+
 // per frame:
 devices.pollEvents();
 bool jumping = devices.isActionPressed("Jump");
 float moveAmount = devices.getAxisValue("MoveX");
+if (auto* pad = devices.gamepad(0); pad && pad->isConnected()) {
+    pad->setVibration(0.5f, 0.5f);
+}
 
 devices.shutdown();
 ```

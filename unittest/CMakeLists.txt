@@ -4,6 +4,7 @@ add_executable(${TEST_NAME}
     TestMain.cpp
     Test_WindowManager.cpp
     Test_Input.cpp
+    Test_Gamepad.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE

@@ -4,7 +4,10 @@
 #include "AYWindowTypes.h"
 #include "AYKeyboardDevice.h"
 #include "AYMouseDevice.h"
+#include "AYGamepadDevice.h"
 #include "AYInputMapping.h"
+
+#include <array>
 
 namespace ayt::device {
 
@@ -17,7 +20,8 @@ struct DeviceConfig {
     bool enableXR = false;
 };
 
-// Phase-2: window + event pump + keyboard/mouse + action/axis mapping.
+// Phase-2: keyboard/mouse + action/axis mapping.
+// Phase-3: gamepads (XInput, up to kMaxGamepads slots polled each frame).
 class DeviceManager {
 public:
     DeviceManager();
@@ -39,11 +43,17 @@ public:
     MouseDevice* mouse() { return _mouseEnabled ? &_mouse : nullptr; }
     const MouseDevice* mouse() const { return _mouseEnabled ? &_mouse : nullptr; }
 
+    // Gamepad by slot (0..kMaxGamepads-1). Returns the slot even when
+    // disconnected; check isConnected(). Null when gamepads are disabled or
+    // the slot is out of range.
+    GamepadDevice* gamepad(int slot = 0);
+    const GamepadDevice* gamepad(int slot = 0) const;
+
     InputMapping& mapping() { return _mapping; }
     const InputMapping& mapping() const { return _mapping; }
 
-    // Advance per-frame edge state, then drain the platform message pump.
-    // Call once per frame (edges are relative to the previous pollEvents()).
+    // Advance per-frame edge state, drain the platform message pump, then poll
+    // gamepads. Call once per frame (edges are relative to the previous call).
     void pollEvents();
 
     // Convenience action/axis queries (forward to the mapping).
@@ -56,10 +66,13 @@ private:
     bool _initialized = false;
     bool _keyboardEnabled = false;
     bool _mouseEnabled = false;
+    bool _gamepadEnabled = false;
 
     WindowManager  _windowManager;
     KeyboardDevice _keyboard;
     MouseDevice    _mouse;
+    std::array<GamepadDevice, kMaxGamepads> _gamepads{
+        GamepadDevice{0}, GamepadDevice{1}, GamepadDevice{2}, GamepadDevice{3}};
     InputMapping   _mapping;
 };
 

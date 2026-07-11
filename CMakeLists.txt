@@ -7,6 +7,7 @@ set(SOURCES
     src/AYDeviceManager.cpp
     src/AYKeyboardDevice.cpp
     src/AYMouseDevice.cpp
+    src/AYGamepadDevice.cpp
     src/AYInputMapping.cpp
 )
 
@@ -19,6 +20,7 @@ set(HEADERS
     include/AYInputDevice.h
     include/AYKeyboardDevice.h
     include/AYMouseDevice.h
+    include/AYGamepadDevice.h
     include/AYInputMapping.h
 )
 
@@ -38,7 +40,7 @@ if(AY_DEVICE_USE_SDL2)
 endif()
 
 if(WIN32)
-    target_link_libraries(${PROJECT_NAME} PUBLIC user32 gdi32)
+    target_link_libraries(${PROJECT_NAME} PUBLIC user32 gdi32 xinput9_1_0)
 endif()
 
 target_link_libraries(${PROJECT_NAME} PUBLIC AYCore)
