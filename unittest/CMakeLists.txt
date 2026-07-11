@@ -5,6 +5,8 @@ add_executable(${TEST_NAME}
     Test_WindowManager.cpp
     Test_Input.cpp
     Test_Gamepad.cpp
+    Test_InputProfile.cpp
+    Test_InputProfileConfig.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE
@@ -13,6 +15,7 @@ target_include_directories(${TEST_NAME} PRIVATE
 
 target_link_libraries(${TEST_NAME} PRIVATE
     AYDevice
+    AYDeviceConfig
     AYTest
 )
 

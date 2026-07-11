@@ -9,6 +9,8 @@ set(SOURCES
     src/AYMouseDevice.cpp
     src/AYGamepadDevice.cpp
     src/AYInputMapping.cpp
+    src/AYInputNames.cpp
+    src/AYInputProfile.cpp
 )
 
 set(HEADERS
@@ -22,6 +24,8 @@ set(HEADERS
     include/AYMouseDevice.h
     include/AYGamepadDevice.h
     include/AYInputMapping.h
+    include/AYInputNames.h
+    include/AYInputProfile.h
 )
 
 add_library(${PROJECT_NAME} STATIC ${SOURCES} ${HEADERS})
@@ -46,6 +50,27 @@ endif()
 target_link_libraries(${PROJECT_NAME} PUBLIC AYCore)
 
 target_compile_options(${PROJECT_NAME} PRIVATE
+    $<$<CXX_COMPILER_ID:MSVC>: /W4>
+    $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
+)
+
+# ===== AYDeviceConfig =====
+# Optional bridge: InputProfile <-> AYConfig persistence. Kept in a separate
+# target so the core AYDevice library stays free of the AYConfig /
+# nlohmann_json dependency chain; only consumers that persist bindings link it.
+add_library(AYDeviceConfig STATIC
+    src/AYInputProfileConfig.cpp
+    include/AYInputProfileConfig.h
+)
+
+target_include_directories(AYDeviceConfig PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+
+target_link_libraries(AYDeviceConfig PUBLIC AYDevice AYConfig)
+
+target_compile_options(AYDeviceConfig PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>: /W4>
     $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>
 )

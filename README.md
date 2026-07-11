@@ -24,6 +24,35 @@ Device subsystem for AY Engine: **window + input** (single module). Input mappin
 - `DeviceManager` — `gamepad(slot)` accessor; `pollEvents()` polls all slots each frame (XInput is polled, not event-driven)
 - Event-feed API (`setConnected` / `onButtonDown` / `setAxis`) lets the devices and mapping be unit-tested without hardware
 
+## Phase-3 (input profile / rebinding)
+
+- `InputProfile` — serializable snapshot of Action/Axis bindings a player can customize; `applyTo(mapping)` pushes bindings into the live `InputMapping`. Bindings are neutral string **tokens** so saved configs survive enum reordering and are hand-editable.
+- `AYInputNames` — stable enum↔string names for `KeyCode` / `MouseButton` / `GamepadButton` / `GamepadAxis`.
+- **AYConfig bridge** (`AYInputProfileConfig`, separate `AYDeviceConfig` target) — persists a profile through AYConfig under `Input.*` dot-keys. Kept out of the core library so `AYDevice` stays free of the AYConfig / nlohmann_json dependency; only consumers that persist bindings link `AYDeviceConfig`.
+
+### Token grammar
+
+| Source | Token |
+|--------|-------|
+| Keyboard key | `Space`, `A`, `F1` |
+| Mouse button | `Mouse:Left` |
+| Gamepad button | `Pad:A`, `Pad:DpadUp` |
+| Axis key pair (neg/pos) | `A/D` (either side may be empty) |
+| Gamepad analog axis | `PadAxis:LeftX`, `PadAxis:RightX*0.5` (optional `*scale`) |
+
+### Config keys (AYConfig)
+
+```
+Input.Profile.Name     = "Default"
+Input.Actions.Jump     = "Space,Pad:A"
+Input.Actions.Fire     = "Mouse:Left"
+Input.Axes.MoveX       = "A/D,PadAxis:LeftX"
+Input.AxesScale.MoveX  = 1.5
+```
+
+Values go through Config's string/float API — human-readable and layerable
+(Engine default → User override) in both JSON and INI.
+
 Default backend is **Win32** on Windows. Optional SDL2 via CMake:
 
 ```cmake

@@ -1,6 +1,6 @@
 # AYDevice Design
 
-> **文档状态（2026-07-11）**：Phase-1 已落地（`WindowManager` + `DeviceManager::pollEvents`）；Phase-2 已落地（`KeyboardDevice` / `MouseDevice` + `InputMapping` Action/Axis）；Phase-3 手柄已落地（`GamepadDevice` XInput + 手柄按钮/摇杆映射 + 震动）。
+> **文档状态（2026-07-11）**：Phase-1 已落地（`WindowManager` + `DeviceManager::pollEvents`）；Phase-2 已落地（`KeyboardDevice` / `MouseDevice` + `InputMapping` Action/Axis）；Phase-3 手柄已落地（`GamepadDevice` XInput + 手柄按钮/摇杆映射 + 震动）；Phase-3 输入配置已落地（`InputProfile` 可重绑定 + AYConfig `[Input.*]` 存档桥接）。
 > **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
 
 ## 1. 概述
@@ -1011,7 +1011,7 @@ AYDevice/
 ### Phase 3: 扩展
 - [ ] TouchDevice (SDL2 Touch)
 - [ ] TextInput (IME)
-- [ ] InputProfile
+- [x] InputProfile（`InputProfile` + `AYInputNames` + AYConfig 桥接 `AYInputProfileConfig`）
 
 ### Phase 4: 高级
 - [ ] InputRecorder
@@ -1039,3 +1039,4 @@ AYDevice/
 | 2026-07-11 | **§1.3**：锁定 AYInput 废弃、输入栈统一归属 AYDevice；`DeviceSubSystem` 替代 `InputSubSystem` |
 | 2026-07-11 | **Phase-2 落地**：`KeyboardDevice` / `MouseDevice`（帧边沿检测）+ `InputMapping`（Action/Axis）+ Win32 键鼠消息翻译，`DeviceManager` 集成键鼠与映射查询 |
 | 2026-07-11 | **Phase-3 手柄落地**：`GamepadDevice`（XInput，最多 4 槽；摇杆死区归一化、扳机、按钮边沿、震动）+ `InputMapping` 手柄按钮/模拟轴源，`DeviceManager` 每帧轮询手柄槽位 |
+| 2026-07-11 | **Phase-3 输入配置落地**：`InputProfile`（token 化可重绑定 + `applyTo(InputMapping)`）+ `AYInputNames`（枚举↔字符串）+ AYConfig 桥接 `AYInputProfileConfig`（`Input.*` dot-key，独立 `AYDeviceConfig` 目标，核心库不引 AYConfig） |

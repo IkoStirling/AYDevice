@@ -9,3 +9,8 @@
 #include "include/AYMouseDevice.h"
 #include "include/AYGamepadDevice.h"
 #include "include/AYInputMapping.h"
+#include "include/AYInputNames.h"
+#include "include/AYInputProfile.h"
+// Note: AYInputProfileConfig.h (AYConfig bridge) is intentionally not included
+// here; include it directly and link AYDeviceConfig only where persistence is
+// needed, to keep the core AYDevice library free of the AYConfig dependency.
