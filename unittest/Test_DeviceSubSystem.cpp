@@ -76,4 +76,36 @@ TEST_CASE(test_subsystem_register_and_find) {
     CHECK(DeviceSubSystem::findRegistered() == nullptr);
 }
 
+TEST_CASE(test_window_provider_reports_valid_window) {
+    ayt::game::SubSystemRegistry::instance().unregisterSubSystem("Device");
+
+    auto provider = DeviceSubSystem::makeWindowProvider();
+    void* handle = nullptr;
+    uint32_t w = 0, h = 0;
+
+    // No registered/ready subsystem yet -> provider returns false.
+    CHECK(!provider(handle, w, h));
+
+    DeviceConfig config{};
+    config.window.width = 400;
+    config.window.height = 300;
+    config.window.hidden = true;
+    DeviceSubSystem::setBootstrapConfig(config);
+
+    auto* sub = new DeviceSubSystem();
+    ayt::game::IGameLoop::instance().registerSubSystem(sub);
+
+    // Registered but not initialized -> still false.
+    CHECK(!provider(handle, w, h));
+
+    CHECK(sub->initialize());
+    CHECK(provider(handle, w, h));
+    CHECK(handle != nullptr);
+    CHECK(w > 0);
+    CHECK(h > 0);
+
+    sub->shutdown();
+    ayt::game::SubSystemRegistry::instance().unregisterSubSystem("Device");
+}
+
 TEST_SUITE_END

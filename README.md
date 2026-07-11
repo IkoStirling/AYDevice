@@ -91,6 +91,16 @@ if (auto* dev = DeviceSubSystem::findRegistered()) {
 Kept in a separate target so the core `AYDevice` library stays free of the
 `AYGameLoop` dependency — the editor uses `DeviceManager` directly without the loop.
 
+### Handing the window to the renderer
+
+`DeviceSubSystem::makeWindowProvider()` returns a `std::function<bool(void*&,
+uint32_t&, uint32_t&)>` that reports the live window handle + size once the
+subsystem is ready. The application passes it to
+`RendererSubSystem::setWindowProvider(...)`, so the renderer fetches its native
+surface from the device layer without either module depending on the other's
+headers (they meet only through the `std::function` signature). Renderer declares
+a `"Device"` subsystem dependency so it initializes after the window exists.
+
 ## Backend
 
 Default backend is **Win32** on Windows. Optional SDL2 via CMake:

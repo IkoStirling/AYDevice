@@ -5,6 +5,9 @@
 
 #include <AYGameLoop.h>
 
+#include <cstdint>
+#include <functional>
+
 namespace ayt::device {
 
 // Owns a DeviceManager and drives it from the game loop:
@@ -46,6 +49,14 @@ public:
     // Explicit, idempotent registration (static-lib-safe; preferred over the
     // REGISTER_SUBSYSTEM auto-init macro which can be stripped from a static lib).
     static void registerSubSystem();
+
+    // Window-source callback for RendererSubSystem. Signature matches
+    // ayt::render::WindowProvider structurally (bool(void*&, uint32_t&,
+    // uint32_t&)) so the two modules interoperate without a header dependency:
+    // the application passes this into RendererSubSystem::setWindowProvider.
+    // Returns false until the DeviceSubSystem window is valid.
+    using WindowProvider = std::function<bool(void*&, uint32_t&, uint32_t&)>;
+    static WindowProvider makeWindowProvider();
 
 private:
     DeviceManager _devices;

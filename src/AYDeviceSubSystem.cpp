@@ -71,4 +71,22 @@ void DeviceSubSystem::registerSubSystem()
     ayt::game::IGameLoop::instance().registerSubSystem(new DeviceSubSystem());
 }
 
+DeviceSubSystem::WindowProvider DeviceSubSystem::makeWindowProvider()
+{
+    return [](void*& outHandle, uint32_t& outWidth, uint32_t& outHeight) -> bool {
+        DeviceSubSystem* self = findRegistered();
+        if (self == nullptr || !self->isReady()) {
+            return false;
+        }
+        const WindowManager& window = self->manager().window();
+        if (!window.isWindowValid()) {
+            return false;
+        }
+        outHandle = window.getWindowHandle();
+        outWidth  = static_cast<uint32_t>(window.getWidth());
+        outHeight = static_cast<uint32_t>(window.getHeight());
+        return outHandle != nullptr;
+    };
+}
+
 } // namespace ayt::device
