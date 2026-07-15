@@ -66,4 +66,26 @@ bool DeviceInputProvider::isJustReleased(const std::string& action) const
     return _mgr->mapping().isActionJustReleased(action);
 }
 
+bool DeviceInputProvider::getAxisValue2D(const std::string& action,
+                                         double& outX, double& outY) const
+{
+    // M1 (2026-07-15): 2-axis read for input.vec2. Returns false
+    // (and zero-bias outX/outY) when the named 2-axis has not been
+    // configured through InputMapping::bindAxis2D. Caller (Logia
+    // ambient lambda) treats false as "unbound" and falls back to
+    // {0, 0}; outX/outY are pre-zeroed below so the branch is a
+    // pure return. Nullptr mgr also returns false safely — matches
+    // the permissive posture of the other DeviceInputProvider
+    // overrides and prevents Editor transient state from crashing
+    // during shutdown races.
+    outX = 0.0;
+    outY = 0.0;
+    if (!_mgr) return false;
+    if (!_mgr->mapping().hasAxis2D(action)) return false;
+    const Vector2 v = _mgr->mapping().getAxis2D(action);
+    outX = static_cast<double>(v.x);
+    outY = static_cast<double>(v.y);
+    return true;
+}
+
 } // namespace ayt::device

@@ -141,4 +141,108 @@ TEST_CASE(test_mapping_axis_scale) {
     CHECK(mapping.getAxisValue("Look") == 2.5f);
 }
 
+// M1 (2026-07-15): thin 2-axis wrapper tests. Convention:
+//   bindAxis2D("move", "move_x", "move_y")
+// composes two already-bound 1-D axes by name. getAxis2D calls
+// getAxisValue(xAxis) + getAxisValue(yAxis) and packages the
+// result as Vector2. No caching; each query = 1 map lookup for
+// the binding + 2 x getAxisValue. Unbound 2-axis name returns
+// Vector2{} (zero vector); underlying 1-axis falls back through
+// InputMapping::getAxisValue's existing 0.0f default.
+TEST_CASE(test_mapping_axis2d_unbound_returns_zero) {
+    InputMapping mapping;   // no keyboard, no bindings
+    CHECK_FALSE(mapping.hasAxis2D("move"));
+    const Vector2 v = mapping.getAxis2D("move");
+    CHECK(v.x == 0.0f);
+    CHECK(v.y == 0.0f);
+    mapping.clearAxis2D("move");   // idempotent on unbound
+}
+
+TEST_CASE(test_mapping_axis2d_combines_two_bound_axes) {
+    KeyboardDevice kb;
+    InputMapping mapping;
+    mapping.setKeyboard(&kb);
+
+    const InputMapping::KeyPair moveX[] = {{KeyCode::A, KeyCode::D}};
+    const InputMapping::KeyPair moveY[] = {{KeyCode::S, KeyCode::W}};
+    mapping.bindAxis("move_x", moveX);
+    mapping.bindAxis("move_y", moveY);
+    mapping.bindAxis2D("move", "move_x", "move_y");
+
+    CHECK(mapping.hasAxis2D("move"));
+
+    kb.newFrame();
+    kb.onKeyDown(KeyCode::D);   // +1 x
+    kb.onKeyDown(KeyCode::W);   // +1 y
+    {
+        Vector2 v = mapping.getAxis2D("move");
+        CHECK(v.x == 1.0f);
+        CHECK(v.y == 1.0f);
+    }
+
+    // Cancel x; clearAxis2D shouldn't affect bindAxis.
+    kb.onKeyDown(KeyCode::A);   // x → 0
+    {
+        Vector2 v = mapping.getAxis2D("move");
+        CHECK(v.x == 0.0f);
+        CHECK(v.y == 1.0f);
+    }
+}
+
+TEST_CASE(test_mapping_axis2d_does_not_disturb_single_axis_query) {
+    KeyboardDevice kb;
+    InputMapping mapping;
+    mapping.setKeyboard(&kb);
+
+    const InputMapping::KeyPair moveX[] = {{KeyCode::A, KeyCode::D}};
+    mapping.bindAxis("move_x", moveX);
+    mapping.bindAxis2D("move", "move_x", "move_y");   // move_y unbound
+
+    kb.newFrame();
+    kb.onKeyDown(KeyCode::D);
+
+    // Single-axis query untouched; 2-axis query yields {1, 0} (y defaults to 0).
+    CHECK(mapping.getAxisValue("move_x") == 1.0f);
+    Vector2 v = mapping.getAxis2D("move");
+    CHECK(v.x == 1.0f);
+    CHECK(v.y == 0.0f);
+}
+
+TEST_CASE(test_mapping_axis2d_clear_drops_binding) {
+    KeyboardDevice kb;
+    InputMapping mapping;
+    mapping.setKeyboard(&kb);
+
+    const InputMapping::KeyPair moveX[] = {{KeyCode::A, KeyCode::D}};
+    mapping.bindAxis("move_x", moveX);
+    mapping.bindAxis2D("move", "move_x", "move_y");
+
+    CHECK(mapping.hasAxis2D("move"));
+    mapping.clearAxis2D("move");
+    CHECK_FALSE(mapping.hasAxis2D("move"));
+    Vector2 v = mapping.getAxis2D("move");
+    CHECK(v.x == 0.0f);
+    CHECK(v.y == 0.0f);
+}
+
+TEST_CASE(test_mapping_axis2d_overwrite_replaces_axes) {
+    // Re-binding "move" with different axes should replace, not
+    // compose. PlayerController code may want to re-bind a 2-axis
+    // (e.g. swap "move_x"+"move_y" -> "aim_x"+"aim_y").
+    KeyboardDevice kb;
+    InputMapping mapping;
+    mapping.setKeyboard(&kb);
+
+    const InputMapping::KeyPair xA[] = {{KeyCode::A, KeyCode::D}};
+    const InputMapping::KeyPair xB[] = {{KeyCode::J, KeyCode::L}};
+    mapping.bindAxis("left_x", xA);
+    mapping.bindAxis("right_x", xB);
+
+    mapping.bindAxis2D("steer", "left_x", "left_y");   // left_y unbound
+    mapping.bindAxis2D("steer", "right_x", "right_y");  // replace
+    const Vector2 v = mapping.getAxis2D("steer");
+    CHECK(v.x == 0.0f);
+    CHECK(v.y == 0.0f);
+}
+
 TEST_SUITE_END

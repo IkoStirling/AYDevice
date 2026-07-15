@@ -43,6 +43,14 @@ public:
     // ambient additions. Both delegate to InputMapping (Phase-2).
     float getAxisValue(const std::string& action) const override;
     bool isJustReleased(const std::string& action) const override;
+    // M1 (2026-07-15): 2-axis read. Delegates to
+    // InputMapping::getAxis2D when the named 2-axis has been bound
+    // via bindAxis2D. On nullptr manager or unbound name, returns
+    // false (outX/outY set to 0.0). Caller (Logia bridge) treats
+    // false as "fall back to {0, 0}" which is the desired safe
+    // default — matches MockInputProvider's permissive posture.
+    bool getAxisValue2D(const std::string& action,
+                        double& outX, double& outY) const override;
 
 private:
     DeviceManager* _mgr; // not owned

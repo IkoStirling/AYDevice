@@ -47,6 +47,23 @@ void InputMapping::clearAxis(std::string_view axis)
     _axes.erase(std::string(axis));
 }
 
+// M1 (2026-07-15): thin 2-axis binding. Records xAxis / yAxis names;
+// does not validate they exist as 1-axis (R-2 decision — let the
+// player wire in their preferred order).
+void InputMapping::bindAxis2D(std::string_view name,
+                              std::string_view xAxis,
+                              std::string_view yAxis)
+{
+    Axis2DBinding& b = _axes2D[std::string(name)];
+    b.xAxis = std::string(xAxis);
+    b.yAxis = std::string(yAxis);
+}
+
+void InputMapping::clearAxis2D(std::string_view name)
+{
+    _axes2D.erase(std::string(name));
+}
+
 const InputMapping::ActionBinding* InputMapping::findAction(std::string_view action) const
 {
     auto it = _actions.find(std::string(action));
@@ -57,6 +74,12 @@ const InputMapping::AxisBinding* InputMapping::findAxis(std::string_view axis) c
 {
     auto it = _axes.find(std::string(axis));
     return it != _axes.end() ? &it->second : nullptr;
+}
+
+const InputMapping::Axis2DBinding* InputMapping::findAxis2D(std::string_view name) const
+{
+    auto it = _axes2D.find(std::string(name));
+    return it != _axes2D.end() ? &it->second : nullptr;
 }
 
 bool InputMapping::isActionPressed(std::string_view action) const
@@ -201,6 +224,24 @@ bool InputMapping::hasAction(std::string_view action) const
 bool InputMapping::hasAxis(std::string_view axis) const
 {
     return findAxis(axis) != nullptr;
+}
+
+// M1 (2026-07-15): 2-axis query. Unbound name → zero vector; bound
+// name → Vector2{getAxisValue(xAxis), getAxisValue(yAxis)}. Component
+// axes that are themselves unbound return 0.0f, which is existing
+// InputMapping::getAxisValue behavior. No caching.
+Vector2 InputMapping::getAxis2D(std::string_view name) const
+{
+    const Axis2DBinding* b = findAxis2D(name);
+    if (b == nullptr) {
+        return Vector2{};
+    }
+    return Vector2{ getAxisValue(b->xAxis), getAxisValue(b->yAxis) };
+}
+
+bool InputMapping::hasAxis2D(std::string_view name) const
+{
+    return findAxis2D(name) != nullptr;
 }
 
 } // namespace ayt::device
