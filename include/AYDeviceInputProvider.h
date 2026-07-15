@@ -6,11 +6,14 @@
 // raw pointer to DeviceManager (caller-owned lifetime — EditorApp
 // member / DeviceSubSystem internal storage).
 //
-// Reads isActionPressed / isActionJustPressed by Action name
-// string. Logia script form:
+// Reads isActionPressed / isActionJustPressed / getAxisValue /
+// isActionJustReleased by Action / Axis name string. Logia script
+// form:
 //   script PlayerController {
 //       on_update() {
 //           if (input.is_pressed("jump")) { jump() }
+//           var dx: float = input.axis("move_x")
+//           if (input.is_just_released("fire")) { release() }
 //       }
 //   }
 //
@@ -31,11 +34,15 @@ public:
     // every query returns false (matches MockInputProvider's
     // permissive "unknown key" behavior — the production invariant
     // matters during Editor transient state right after shutdown
-    // begins).
+    // begins). `axis` queries return 0.0f on nullptr.
     explicit DeviceInputProvider(DeviceManager* mgr) noexcept;
 
     bool isPressed(const std::string& action) const override;
     bool isJustPressed(const std::string& action) const override;
+    // INT-03 (2026-07-15): axis + release edge — mirror Logia
+    // ambient additions. Both delegate to InputMapping (Phase-2).
+    float getAxisValue(const std::string& action) const override;
+    bool isJustReleased(const std::string& action) const override;
 
 private:
     DeviceManager* _mgr; // not owned
