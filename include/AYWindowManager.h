@@ -58,6 +58,14 @@ public:
     void notifyResized(int width, int height);
     void notifyFocused(bool focused);
 
+    // Poll-style close-requested flag. Set when `notifyClosed()` is invoked
+    // (typically by the SDL bridge or a Win32 WM_CLOSE handler); consumed by
+    // `consumeCloseRequested()` which returns true once and resets the flag.
+    // Lets DeviceSubSystem detect a close request during update() and emit
+    // a WindowCloseEvent onto the EventBus without having to re-enter the
+    // callback chain.
+    bool consumeCloseRequested();
+
     // Interim editor viewport (E2-interim child HWND). Returns opaque native handle.
     bool createChildWindow(const ChildWindowDesc& desc, void*& outHandle);
     void destroyChildWindow(void* handle);

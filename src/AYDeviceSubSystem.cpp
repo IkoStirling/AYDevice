@@ -2,6 +2,10 @@
 
 #include <AYSubSystemRegistry.h>
 
+#include <AYAppEventHost.h>
+#include <ayevent/EventBus.h>
+#include <ayevent/Events/WindowEvents.h>
+
 namespace ayt::device {
 
 namespace {
@@ -32,23 +36,71 @@ bool DeviceSubSystem::initialize()
     if (!_devices.initialize(g_bootstrapConfig)) {
         return false;
     }
+
+    // Seed last-size tracker so the first update() doesn't fire a spurious
+    // resize event for the window's initial dimensions.
+    if (_devices.window().isWindowValid()) {
+        _devices.window().getSize(_lastWidth, _lastHeight);
+    } else {
+        _lastWidth = _lastHeight = 0;
+    }
+
     _ready = true;
     return true;
 }
 
 void DeviceSubSystem::update(float /*deltaTime*/)
 {
-    if (_ready) {
-        _devices.pollEvents();
+    if (!_ready) {
+        return;
+    }
+
+    // pollEvents() drives the SDL/Win32 message pump + advances input edge
+    // state. By the time it returns, all per-frame window state mutations
+    // (resizes, close requests) have already been latched.
+    _devices.pollEvents();
+
+    auto& window = _devices.window();
+    if (!window.isWindowValid()) {
+        return;
+    }
+
+    // ----- WindowResize delta detection -----
+    // post (not emit) so the bridge is safe to call from the main thread
+    // without forcing synchronous listener execution mid-frame; consumers
+    // pump the bus at their own cadence (GameLoop pumps once per frame
+    // after waitForRenderComplete — see AYGameLoop Phase 4).
+    int width  = 0;
+    int height = 0;
+    window.getSize(width, height);
+    if (width != _lastWidth || height != _lastHeight) {
+        _lastWidth  = width;
+        _lastHeight = height;
+        ayt::event::EventBus::instance().post<ayt::event::WindowResizeEvent>(
+            ayt::event::WindowResizeEvent{width, height});
+    }
+
+    // ----- WindowClose forward -----
+    // consumeCloseRequested() is single-shot — we always re-arm by
+    // re-posting until the host decides to call shutdown().
+    if (window.consumeCloseRequested()) {
+        ayt::event::EventBus::instance().post<ayt::event::WindowCloseEvent>({});
     }
 }
 
 void DeviceSubSystem::shutdown()
 {
-    if (_ready) {
-        _devices.shutdown();
-        _ready = false;
+    if (!_ready) {
+        return;
     }
+    _devices.shutdown();
+    // Release any host-scoped subscriptions we may have added in the future
+    // (today the bridge is purely a producer — but the scope is here so
+    // future Device-side listeners, e.g. accessibility hooks or gamepad
+    // hot-plug watchers, plug in via _events.subscribe<T>() without
+    // touching this file again).
+    _events.disconnect();
+    _ready = false;
 }
 
 DeviceSubSystem* DeviceSubSystem::findRegistered()

@@ -97,6 +97,11 @@ add_library(AYDeviceSubSystem STATIC
 target_include_directories(AYDeviceSubSystem PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    # INT-03 (2026-07-20): Device->EventBus bridge. AYAppEventHost.h lives in
+    # AYApplication/interface — DeviceSubSystem consumes EventBusHostScope
+    # to host its post<WindowResize/Close> producer + any future listener
+    # ownership (Phase 4 §a8c8be9 lesson applied here too).
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 
 target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop
@@ -104,7 +109,11 @@ target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop
     # interface that DeviceInputProvider derives from. AYScript's transitive
     # deps (AYReflect, sol2) don't leak because we only consume the input
     # seam — see AYScript/include/AYScriptRuntimeBridge.h:509.
-    PRIVATE AYScript)
+    PRIVATE AYScript
+    # INT-03 (2026-07-20): EventBusHostScope lives in AYApplication
+    # (interface/AYAppEventHost.h). Linking AYApplication pulls the scope
+    # type + (transitively) AYEventSystem, which is the bus Device posts to.
+    PRIVATE AYApplication)
 
 target_compile_options(AYDeviceSubSystem PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>: /W4>

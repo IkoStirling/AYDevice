@@ -5,6 +5,13 @@
 
 #include <AYGameLoop.h>
 
+// INT-03 (2026-07-20): Device -> EventBus bridge. EventBusHostScope is the
+// host-side RAII container from AYApplication that owns any per-Device-sub-
+// system listeners (Phase 4 §a8c8be9 lesson — the device bridge is a pure
+// producer today, but the scope is here so future Device-side listeners
+// plug in via _events.subscribe<T>()).
+#include <AYAppEventHost.h>
+
 #include <cstdint>
 #include <functional>
 
@@ -61,6 +68,19 @@ public:
 private:
     DeviceManager _devices;
     bool          _ready = false;
+
+    // Last observed window dimensions — compared each update() against the
+    // current WindowManager::getSize() to detect resize deltas. Seeded from
+    // initialize() so the first poll doesn't fire a spurious event.
+    int _lastWidth  = 0;
+    int _lastHeight = 0;
+
+    // Host-side EventBus host scope (Phase 4 lesson). The bridge today is a
+    // pure producer (post<WindowResize/Close>); the scope is here so future
+    // Device-side listeners plug in via _events.subscribe<T>() without
+    // touching this file. Released in shutdown() before GameLoop continues
+    // teardown.
+    ayt::app::EventBusHostScope _events;
 };
 
 } // namespace ayt::device

@@ -100,6 +100,12 @@ struct WindowManager::Impl {
 #endif
 
     bool valid = false;
+
+    // Set by notifyClosed() so a poll-style observer (DeviceSubSystem) can
+    // detect a close request during update() and forward it to the EventBus
+    // without re-entering the onClose callback. Consumed by
+    // consumeCloseRequested() — single-shot, idempotent.
+    bool closeRequested = false;
 };
 
 #if defined(_WIN32)
@@ -487,9 +493,26 @@ void WindowManager::setSize(int width, int height)
 
 void WindowManager::notifyClosed()
 {
-    if (_impl && _impl->onClose) {
+    if (!_impl) {
+        return;
+    }
+    // Latch first so the close-requested flag is visible to a poll-style
+    // observer before the callback chain unwinds (callbacks may signal
+    // "shutdown in progress" via the same flag — see DeviceSubSystem::update).
+    _impl->closeRequested = true;
+    if (_impl->onClose) {
         _impl->onClose();
     }
+}
+
+bool WindowManager::consumeCloseRequested()
+{
+    if (!_impl) {
+        return false;
+    }
+    const bool was = _impl->closeRequested;
+    _impl->closeRequested = false;
+    return was;
 }
 
 void WindowManager::notifyResized(int width, int height)

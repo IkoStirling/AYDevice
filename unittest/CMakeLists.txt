@@ -9,10 +9,14 @@ add_executable(${TEST_NAME}
     Test_InputProfileConfig.cpp
     Test_TouchText.cpp
     Test_DeviceSubSystem.cpp
+    # INT-03 (2026-07-20): DeviceSubSystem -> EventBus bridge.
+    Test_DeviceEventBridge.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
+    # INT-03: AYAppEventHost.h (EventBusHostScope) lives here.
+    ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 
 target_link_libraries(${TEST_NAME} PRIVATE
@@ -20,6 +24,9 @@ target_link_libraries(${TEST_NAME} PRIVATE
     AYDeviceConfig
     AYDeviceSubSystem
     AYTest
+    # INT-03: EventBusHostScope is owned by the bridge; AYApplication
+    # provides the type + (transitively) AYEventSystem for the bus.
+    AYApplication
 )
 
 add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})
