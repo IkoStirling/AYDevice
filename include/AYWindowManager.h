@@ -71,6 +71,15 @@ public:
     void destroyChildWindow(void* handle);
     void destroyAllChildWindows();
 
+    // D5 — top-level (independent) OS window hosting a child DockArea. The
+    // handle is opaque (`void*` — never include `<Windows.h>` in headers
+    // per K-INV-D5-3). Pair with `setTopLevelCallbacks` for resize/close
+    // plumbing before the user interacts with the window.
+    bool createTopLevelWindow(const TopLevelWindowDesc& desc, void*& outHandle);
+    void destroyTopLevelWindow(void* handle);
+    void destroyAllTopLevelWindows();
+    void setTopLevelCallbacks(void* handle, const TopLevelWindowCallbacks& cbs);
+
     // Platform message hook (Win32 wndproc / SDL window events).
     void processPlatformEvent(unsigned msg, std::uintptr_t wParam, std::intptr_t lParam);
     std::intptr_t tryHandleUserMessage(unsigned msg, std::uintptr_t wParam, std::intptr_t lParam,

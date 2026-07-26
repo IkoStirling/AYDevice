@@ -11,6 +11,8 @@ add_executable(${TEST_NAME}
     Test_DeviceSubSystem.cpp
     # INT-03 (2026-07-20): DeviceSubSystem -> EventBus bridge.
     Test_DeviceEventBridge.cpp
+    # D5 (2026-07-26): WindowManager::createTopLevelWindow.
+    Test_WindowManager_TopLevel.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE

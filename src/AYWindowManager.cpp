@@ -2,7 +2,12 @@
 
 #include <algorithm>
 #include <string>
+#include <unordered_map>
 #include <vector>
+
+#if defined(_WIN32)
+#  include <mutex>
+#endif
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -62,6 +67,11 @@ WindowManager* windowFromHwnd(HWND hwnd)
 {
     return reinterpret_cast<WindowManager*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
 }
+
+// Forward-declared so D5's TopLevelWndProc thunk (defined further
+// down in the same namespace) can read client size before the
+// definition is encountered by the compiler.
+void readClientSize(HWND hwnd, int& width, int& height);
 #endif
 
 } // namespace
@@ -74,6 +84,7 @@ struct WindowManager::Impl {
     int height = 0;
     bool resizable = true;
     std::vector<HWND> childWindows;
+    std::vector<HWND> topLevelWindows;       // D5 — owns HWNDs created by createTopLevelWindow
 
     WindowCloseCallback onClose;
     WindowResizeCallback onResize;
@@ -153,6 +164,98 @@ bool registerChildWindowClass(HINSTANCE instance)
     wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
     wc.lpszClassName = kChildWindowClass;
     wc.lpfnWndProc = DefWindowProcW;
+
+    return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
+}
+
+// D5 — top-level (WS_OVERLAPPEDWINDOW) window registration. WndProc MUST be
+// a free-static thunk (K-INV-D5-5) because Win32 class registration
+// requires a `__stdcall` function pointer with C linkage — we can't store
+// a lambda capturing `this`. The thunk dispatches via the
+// `s_topLevelOwners` map (HWND → owning WindowManager).
+const wchar_t* kTopLevelWindowClass = L"AYDeviceTopLevelWindow";
+
+// File-static registry. Lifetime: process-wide. Protected by a single
+// `std::mutex` because window messages can arrive on the thread that
+// pumps Win32 messages; the test runner does this from a single thread
+// in D5 v1, but the mutex keeps the door open for the Win32
+// GetMessage/DispatchMessage loop without UAF.
+std::unordered_map<HWND, WindowManager*> s_topLevelOwners;
+std::unordered_map<HWND, TopLevelWindowCallbacks> s_topLevelCallbacks;
+std::mutex s_topLevelMu;
+
+LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    // WM_NCCREATE is delivered BEFORE WM_CREATE; we get the owner pointer
+    // through a side channel (the WM_NCCREATE lpCreateParams holds the
+    // lpParam we passed into CreateWindowExW). Subsequent messages look it
+    // up from s_topLevelOwners (set after CreateWindowExW returns).
+    if (msg == WM_NCCREATE) {
+        auto* cs = reinterpret_cast<CREATESTRUCTW*>(lParam);
+        auto* owner = reinterpret_cast<WindowManager*>(cs->lpCreateParams);
+        SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(owner));
+        std::lock_guard<std::mutex> g(s_topLevelMu);
+        s_topLevelOwners[hwnd] = owner;
+        return TRUE;
+    }
+
+    WindowManager* owner = windowFromHwnd(hwnd);
+    if (owner != nullptr) {
+        if (msg == WM_SIZE) {
+            // Read new client size; invoke callbacks from a map guarded by
+            // the same mutex as the owners map (to avoid iterator
+            // invalidation if a callback mutates s_topLevelCallbacks).
+            TopLevelWindowCallbacks cbs;
+            {
+                std::lock_guard<std::mutex> g(s_topLevelMu);
+                auto it = s_topLevelCallbacks.find(hwnd);
+                if (it != s_topLevelCallbacks.end()) {
+                    cbs = it->second;
+                }
+            }
+            if (cbs.onResize) {
+                int w = 0, h = 0;
+                readClientSize(hwnd, w, h);
+                cbs.onResize(w, h);
+            }
+            return 0;
+        }
+        if (msg == WM_CLOSE) {
+            TopLevelWindowCallbacks cbs;
+            {
+                std::lock_guard<std::mutex> g(s_topLevelMu);
+                auto it = s_topLevelCallbacks.find(hwnd);
+                if (it != s_topLevelCallbacks.end()) {
+                    cbs = it->second;
+                }
+            }
+            if (cbs.onCloseRequested) {
+                cbs.onCloseRequested();
+                // Suppress default destruction — the host decides whether
+                // to DestroyWindow via closeChildWindow. If the host
+                // doesn't call it, the window will simply close through
+                // WM_CLOSE re-entry or be cleaned up by the WindowManager
+                // dtor (destroyAllTopLevelWindows).
+                return 0;
+            }
+            // No callback registered — fall through to DefWindowProc which
+            // will trigger DestroyWindow.
+        }
+    }
+
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+bool registerTopLevelWindowClass(HINSTANCE instance)
+{
+    WNDCLASSEXW wc{};
+    wc.cbSize = sizeof(wc);
+    wc.style = CS_HREDRAW | CS_VREDRAW;
+    wc.hInstance = instance;
+    wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    wc.lpszClassName = kTopLevelWindowClass;
+    wc.lpfnWndProc = TopLevelWndProc;
 
     return RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
@@ -370,6 +473,7 @@ void WindowManager::destroyWindow()
     }
 
     destroyAllChildWindows();
+    destroyAllTopLevelWindows();
 
 #if defined(AY_DEVICE_USE_SDL2)
     if (_impl->sdlWindow != nullptr) {
@@ -758,6 +862,134 @@ void WindowManager::destroyAllChildWindows()
         }
     }
     _impl->childWindows.clear();
+#endif
+}
+
+// =============================================================================
+// D5 — top-level (independent) OS windows.
+//
+// Each top-level window has its own Win32 message pump driven by the editor
+// session's `EditorChildWindowManager::routeKey`/`update` paths; the
+// callback wiring (`setTopLevelCallbacks`) registers independent lambdas
+// per handle so child windows close independently of the main editor
+// window. Linux/macOS are stubs (return false) — v2 covers SDL2/X11 parity.
+// =============================================================================
+
+bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& outHandle)
+{
+    outHandle = nullptr;
+    if (!_impl || desc.width < 1 || desc.height < 1) {
+        return false;
+    }
+
+#if defined(_WIN32)
+    if (!registerTopLevelWindowClass(_impl->instance)) {
+        return false;
+    }
+
+    const std::wstring title = utf8ToWide(desc.title);
+    // Pass `this` as lpParam so WM_NCCREATE can stash the owning
+    // WindowManager via GWLP_USERDATA (the WndProc itself can't capture).
+    // The public header uses `-1` as the "OS default position" sentinel
+    // (K-INV-D5-3 forbids pulling Win32's `CW_USEDEFAULT` into the public
+    // header); translate it back to the proper macro here.
+    const int xPos = (desc.x < 0) ? CW_USEDEFAULT : desc.x;
+    const int yPos = (desc.y < 0) ? CW_USEDEFAULT : desc.y;
+    HWND hwnd = CreateWindowExW(
+        0,
+        kTopLevelWindowClass,
+        title.c_str(),
+        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        xPos,
+        yPos,
+        desc.width,
+        desc.height,
+        nullptr,                    // top-level: no parent
+        nullptr,                    // no menu
+        _impl->instance,
+        reinterpret_cast<LPVOID>(this));
+
+    if (hwnd == nullptr) {
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> g(s_topLevelMu);
+        s_topLevelOwners[hwnd] = this;
+        s_topLevelCallbacks[hwnd] = TopLevelWindowCallbacks{};
+    }
+    _impl->topLevelWindows.push_back(hwnd);
+    outHandle = static_cast<void*>(hwnd);
+    return true;
+
+#else
+    (void)desc;
+    return false;
+#endif
+}
+
+void WindowManager::destroyTopLevelWindow(void* handle)
+{
+    if (!_impl || handle == nullptr) {
+        return;
+    }
+
+#if defined(_WIN32)
+    HWND hwnd = static_cast<HWND>(handle);
+    {
+        std::lock_guard<std::mutex> g(s_topLevelMu);
+        s_topLevelCallbacks.erase(hwnd);
+        s_topLevelOwners.erase(hwnd);
+    }
+    auto it = std::find(_impl->topLevelWindows.begin(), _impl->topLevelWindows.end(), hwnd);
+    if (it != _impl->topLevelWindows.end()) {
+        DestroyWindow(hwnd);
+        _impl->topLevelWindows.erase(it);
+    }
+#else
+    (void)handle;
+#endif
+}
+
+void WindowManager::destroyAllTopLevelWindows()
+{
+    if (!_impl) {
+        return;
+    }
+
+#if defined(_WIN32)
+    {
+        std::lock_guard<std::mutex> g(s_topLevelMu);
+        // Iterate over a snapshot — destroyTopLevelWindow mutates
+        // s_topLevelOwners / s_topLevelCallbacks.
+        const auto windows = _impl->topLevelWindows;
+        for (HWND hwnd : windows) {
+            s_topLevelCallbacks.erase(hwnd);
+            s_topLevelOwners.erase(hwnd);
+        }
+    }
+    for (HWND hwnd : _impl->topLevelWindows) {
+        if (hwnd != nullptr) {
+            DestroyWindow(hwnd);
+        }
+    }
+    _impl->topLevelWindows.clear();
+#else
+#endif
+}
+
+void WindowManager::setTopLevelCallbacks(void* handle, const TopLevelWindowCallbacks& cbs)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    std::lock_guard<std::mutex> g(s_topLevelMu);
+    s_topLevelCallbacks[hwnd] = cbs;
+#else
+    (void)handle;
+    (void)cbs;
 #endif
 }
 
