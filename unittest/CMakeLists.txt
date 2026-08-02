@@ -31,4 +31,5 @@ target_link_libraries(${TEST_NAME} PRIVATE
     AYApplication
 )
 
+ay_configure_test_tmpdir(${TEST_NAME})
 add_test(NAME ${TEST_NAME} COMMAND ${TEST_NAME})

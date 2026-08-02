@@ -1,6 +1,9 @@
 cmake_minimum_required(VERSION 3.20)
 
-project(AYDevice)
+project(AYDevice
+    VERSION 0.1.0
+    DESCRIPTION "AYDevice — input/SDL2/window/input-mapping SubSystem"
+)
 
 set(SOURCES
     src/AYWindowManager.cpp
@@ -121,3 +124,5 @@ target_compile_options(AYDeviceSubSystem PRIVATE
 )
 
 add_subdirectory(unittest)
+
+message(STATUS "AYDevice v0.1.0 (M1 InputMapping + INT-03 bus bridge + D5 top-level HWND) — see ${CMAKE_CURRENT_SOURCE_DIR}/design.md")

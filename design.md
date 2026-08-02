@@ -1,6 +1,6 @@
 # AYDevice Design
 
-> **文档状态（2026-07-11）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）+ `DeviceSubSystem`（GameLoop 集成，独立 `AYDeviceSubSystem` 目标）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
+> **文档状态（2026-07-27）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）+ `DeviceSubSystem`（GameLoop 集成，独立 `AYDeviceSubSystem` 目标）。**下一薄能力**：`InputMapping` Action 按住时长（§6.3，未实现）。**Phase 4**：触控 `GestureRecognizer`（含 `LongPress`，§8.3）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
 > **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
 
 ## 1. 概述
@@ -94,6 +94,8 @@ AYDevice 是 AY Engine 的**设备子系统**，负责：
 | **Phase-1（当前）** | `WindowManager` + `pollEvents`（窗口事件） | 无键盘/映射 |
 | **Phase-2** | `KeyboardDevice` + `MouseDevice` + `InputMapping` | Logia INT-02 依赖此阶段 |
 | **Phase-3** | Gamepad(XInput) / Touch(WM_TOUCH) / TextInput(IME) / InputProfile(+AYConfig) | **已完成**（除 XR） |
+| **下一薄能力（H0）** | `InputMapping` Action Hold（§6.3） | 按住时长 + 可选阈值边沿；先于完整手势 |
+| **Phase-4** | `GestureRecognizer` / InputRecorder / AimAssistance / MotionInput | 触控手势含 LongPress |
 | **未来增强** | XR (OpenXR) | 依赖 AYRenderer XR 呈现 + headset，见 §7 |
 
 **明确不做**：
@@ -130,7 +132,8 @@ AYDevice 是 AY Engine 的**设备子系统**，负责：
 │  InputMapping                                                │
 │      │                                                        │
 │      ├── ActionBinding  ("Jump" → [Space, Gamepad_A, XR_A])   │
-│      └── AxisBinding     ("MoveX" → [A/D, Gamepad_LX])         │
+│      ├── AxisBinding     ("MoveX" → [A/D, Gamepad_LX])         │
+│      └── ActionHold      (按住时长 / 可选阈值边沿，§6.3)       │
 │                                                              │
 │  InputState                                                 │
 │      │                                                        │
@@ -140,7 +143,7 @@ AYDevice 是 AY Engine 的**设备子系统**，负责：
 │      │                                                        │
 │      ├── InputRecorder (录制/回放)                          │
 │      ├── TextInput (IME 文本输入)                            │
-│      ├── GestureRecognizer (手势识别)                        │
+│      ├── GestureRecognizer (触控手势：Tap/LongPress/Swipe…)  │
 │      ├── InputProfile (玩家配置)                            │
 │      ├── HapticFeedback (触觉反馈)                           │
 │      └── AimAssistance (瞄准辅助)                           │
@@ -488,7 +491,14 @@ public:
     // ================ 查询 ================
     bool isActionPressed(const char* action) const;
     bool isActionJustPressed(const char* action) const;
+    bool isActionJustReleased(const char* action) const;
     float getAxisValue(const char* axis) const;
+
+    // ================ Action 按住时长（§6.3，待实现） ================
+    // void updateHoldTimers(float deltaSeconds);   // 由 DeviceManager / DeviceSubSystem 每帧调用
+    // float getActionHoldTime(const char* action) const;
+    // bool  isActionHeld(const char* action, float thresholdSeconds) const;
+    // bool  isActionHoldJustTriggered(const char* action, float thresholdSeconds) const;
 
     // ================ 内部 ================
     void registerDevice(IInputDevice* device);
@@ -500,6 +510,67 @@ private:
     std::vector<IInputDevice*> m_devices;
 };
 ```
+
+### 6.3 Action 按住时长（Hold）— 待实现
+
+> **状态（2026-07-27）**：设计锁定，**未实现**。与 §8.3 `GestureRecognizer` 分工见下。
+
+#### 6.3.1 为什么进引擎层
+
+短按 / 长按 / 蓄力是跨项目高频需求。若玩法层各自对物理键计时，换绑（`InputProfile`）后易与 Action 源脱节。Hold 挂在 **已解析的 Action 按下态** 上，换绑自动生效。
+
+#### 6.3.2 与触控手势的边界（锁定）
+
+| 能力 | 归属 | 输入源 | 语义 |
+|------|------|--------|------|
+| Action Hold | **`InputMapping`（§6.3）** | 键盘 / 鼠标按钮 / 手柄按钮（经 Action 绑定） | 可重绑定逻辑动作的按住秒数与阈值边沿 |
+| `GestureRecognizer` | **Features（§8.3）** | 触控点流（`TouchDevice`） | Tap / DoubleTap / LongPress / Swipe / Pinch / Rotate |
+
+**不做**：把每个 Action 强制二分成「短按 Action / 长按 Action」；阈值与「松开结算 vs 按住持续触发」属玩法策略，由查询 API 组合，不写死绑定表。
+
+#### 6.3.3 目标 API
+
+```cpp
+// 每帧在设备轮询之后、玩法查询之前调用（DeviceSubSystem::update 内）。
+void updateHoldTimers(float deltaSeconds);
+
+// 当前连续按住时长（秒）。Action 未按下时为 0。
+// JustReleased 当帧：仍返回「刚结束的那次按住」的总时长（便于短按判定），
+// 下一帧若未再按下则清零。
+float getActionHoldTime(std::string_view action) const;
+
+// 是否已按住超过 threshold（持续为 true，直到松开）。
+bool isActionHeld(std::string_view action, float thresholdSeconds) const;
+
+// 本帧刚跨越 threshold 的边沿（长按「触发一次」）。
+// 同一按住周期内只触发一次；松开后下次再按可再次触发。
+bool isActionHoldJustTriggered(std::string_view action, float thresholdSeconds) const;
+```
+
+实现要点：
+
+- 计时对象是 **Action 聚合按下态**（所有绑定源 OR），不是单个物理键。
+- `thresholdSeconds` **按查询传入**，不存进 `ActionBinding`（同一 Action 可被 UI 用 0.25s、技能用 0.5s）。
+- 可选后续（非本步范围）：`setActionDefaultHoldThreshold` 仅作便利默认值，不得替代查询参数。
+
+#### 6.3.4 玩法组合约定
+
+```text
+短按：isActionJustReleased(A) && getActionHoldTime(A) < T
+长按触发一次：isActionHoldJustTriggered(A, T)
+长按持续：isActionHeld(A, T)           // 或 getActionHoldTime(A) >= T
+蓄力条：Pressed 期间读 getActionHoldTime(A)
+```
+
+现有 `isActionPressed` / `JustPressed` / `JustReleased` **保持不变**；Hold 为叠加查询，不改变边沿语义。
+
+#### 6.3.5 实现分期
+
+| 步 | 交付 | 状态 |
+|----|------|------|
+| **H0（下一薄能力）** | `updateHoldTimers` + `getActionHoldTime` + `isActionHeld` + `isActionHoldJustTriggered`；单测覆盖跨帧 / 换绑 / JustReleased 当帧时长 | 待做 |
+| **H1** | （可选）Logia / `InputProvider` 暴露同名查询 | 待做 |
+| **G0** | §8.3 `GestureRecognizer` 触控 LongPress 等 | Phase 4，独立于 H0 |
 
 ---
 
@@ -683,7 +754,11 @@ private:
 };
 ```
 
-### 8.3 手势识别
+### 8.3 手势识别（触控）
+
+> **范围**：仅消费 `TouchDevice` 触控点流。键盘 / 鼠标 / 手柄上的「长按」走 **`InputMapping` Action Hold（§6.3）**，不经本类。
+>
+> **状态**：Phase 4，未实现。触控 `LongPress` 与 Action Hold 可并存（例如 UI 触控长按菜单 vs 手柄 `Interact` 长按）；二者阈值独立配置。
 
 ```cpp
 class GestureRecognizer {
@@ -692,7 +767,7 @@ public:
         None,
         Tap,                // 点击
         DoubleTap,          // 双击
-        LongPress,         // 长按
+        LongPress,         // 长按（触控）
         SwipeLeft, SwipeRight, SwipeUp, SwipeDown,  // 滑动
         Pinch,             // 缩放
         Rotate             // 旋转
@@ -704,6 +779,9 @@ public:
     void addTouchPoint(int id, const FVector2& pos);
     void updateTouchPoint(int id, const FVector2& pos);
     void removeTouchPoint(int id);
+
+    // 可选：长按阈值（秒），默认实现自定；与 §6.3 Action Hold 的 threshold 无关
+    void setLongPressThreshold(float seconds);
 
     // 查询
     Gesture getRecognizedGesture() const { return m_gesture; }
@@ -718,6 +796,7 @@ private:
     float m_velocity = 0.0f;
     float m_pinchScale = 1.0f;
     float m_rotationAngle = 0.0f;
+    float m_longPressThreshold = 0.5f;
 
     std::unordered_map<int, FVector2> m_touchPoints;
 };
@@ -1022,9 +1101,14 @@ AYDevice/
 - [x] TextInput (IME)（Win32 `WM_CHAR` + `WM_IME_COMPOSITION`，UTF-8）
 - [x] InputProfile（`InputProfile` + `AYInputNames` + AYConfig 桥接 `AYInputProfileConfig`）
 
+### Phase 3.5 / 下一薄能力: Action Hold（§6.3）
+- [ ] `InputMapping::updateHoldTimers` + `getActionHoldTime` / `isActionHeld` / `isActionHoldJustTriggered`
+- [ ] 单测：跨帧累加、JustReleased 当帧时长、换绑后计时跟 Action、阈值边沿只触发一次
+- [ ] （可选）`DeviceSubSystem` / Logia `InputProvider` 转发
+
 ### Phase 4: 高级
 - [ ] InputRecorder
-- [ ] GestureRecognizer
+- [ ] GestureRecognizer（触控；含 `LongPress`，与 §6.3 Action Hold 分工见 §6.3.2 / §8.3）
 - [ ] AimAssistance
 - [ ] MotionInput
 
@@ -1053,3 +1137,4 @@ AYDevice/
 | 2026-07-11 | **XR 决策**：OpenXR 移入「未来引擎增强项」，退出当前进程。前置依赖：AYRenderer XR swapchain 呈现 + 可用 headset runtime。`openxr-loader` vcpkg 端口(1.1.54)可用但未安装；接口设计存档于 §7。 |
 | 2026-07-11 | **GameLoop 集成落地**：`DeviceSubSystem`（"Device" 子系统，priority 0 / Unscaled；`initialize`→建窗+设备，`update`→`pollEvents`，`shutdown`→拆除）+ `setBootstrapConfig`/`registerSubSystem`/`findRegistered`（静态库安全显式注册，仿 `RendererSubSystem`）。独立 `AYDeviceSubSystem` 目标，核心库不引 AYGameLoop。 |
 | 2026-07-11 | **AYApplication + Renderer 打通**：`DeviceSubSystem::makeWindowProvider()` 返回 `std::function<bool(void*&,uint32_t&,uint32_t&)>`，经 `RendererSubSystem::setWindowProvider` 把窗口句柄喂给渲染器（两模块仅靠 function 签名互通，互不依赖对方头，绕开 Renderer C++17 / Device C++20 冲突）。Renderer 声明 `"Device"` 依赖保证初始化顺序。AYApplication `registerSubSystems()` 注册 DeviceSubSystem（`AYDeviceSubSystem` PRIVATE 链）。 |
+| 2026-07-27 | **§6.3 Action Hold 设计锁定（未实现）**：`getActionHoldTime` / `isActionHeld` / `isActionHoldJustTriggered`；阈值按查询传入，不强制短/长按二分。与 §8.3 触控 `GestureRecognizer::LongPress` 明确分工。架构图、§1.3 分期、Phase 3.5 清单同步；文档状态抬头更新。 |
