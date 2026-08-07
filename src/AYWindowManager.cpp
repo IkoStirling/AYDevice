@@ -20,6 +20,9 @@
 #  include <imm.h>
 #endif
 
+#include <cstdio>
+#include <cstdlib>
+
 #if defined(AY_DEVICE_USE_SDL2)
 #  include <SDL.h>
 #  include <SDL_syswm.h>
@@ -76,6 +79,24 @@ void readClientSize(HWND hwnd, int& width, int& height);
 
 } // namespace
 
+#if defined(_WIN32)
+// PR-InputTrace: opt-in stderr trace for raw-input registration +
+// WM_INPUT / WM_POINTER / WM_GESTURE firing diagnostics. Used to
+// identify which Windows message path actually delivers wheel events
+// for a given trackpad/driver combination (Gallery S1/S2 2026-08-07).
+// Set AY_DEVICE_TRACE_INPUT=1 before launching AYUI_Gallery.
+namespace {
+bool ayDeviceTraceInputEnabled() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* env = std::getenv("AY_DEVICE_TRACE_INPUT");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
+}   // namespace
+#endif
+
 struct WindowManager::Impl {
 #if defined(_WIN32)
     HWND hwnd = nullptr;
@@ -105,6 +126,14 @@ struct WindowManager::Impl {
     // WM_INPUT (raw input) instead of WM_MOUSEWHEEL. Registered once per
     // window in createWindow; unregistered in destroyWindow.
     bool rawInputRegistered = false;
+
+    // PR-InputTrace: per-message-class trigger counters. Diagnostic only;
+    // logged once at first trigger and every 60 thereafter to avoid
+    // stderr spam during sustained trackpad gestures.
+    int rawInputTriggerCount = 0;
+    int pointerTriggerCount = 0;
+    int gestureTriggerCount = 0;
+    int mouseWheelTriggerCount = 0;
 
     // WM_CHAR delivers UTF-16; a leading high surrogate is held until its pair.
     wchar_t pendingHighSurrogate = 0;
@@ -467,8 +496,16 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
         rid.usUsage     = 0x02;
         rid.dwFlags     = RIDEV_INPUTSINK;
         rid.hwndTarget  = hwnd;
-        if (::RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
+        const BOOL regOk = ::RegisterRawInputDevices(&rid, 1, sizeof(rid));
+        if (regOk) {
             _impl->rawInputRegistered = true;
+        }
+        if (ayDeviceTraceInputEnabled()) {
+            std::fprintf(stderr,
+                "[AYDevice-InputTrace] RegisterRawInputDevices: ok=%d hwnd=%p err=%lu\n",
+                regOk ? 1 : 0,
+                static_cast<void*>(hwnd),
+                regOk ? 0UL : static_cast<unsigned long>(::GetLastError()));
         }
     }
 
@@ -1111,11 +1148,61 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
 
     // ===== Mouse wheel (normalized to notches) =====
     case WM_MOUSEWHEEL:
+        if (ayDeviceTraceInputEnabled()) {
+            ++_impl->mouseWheelTriggerCount;
+            if (_impl->mouseWheelTriggerCount == 1 ||
+                (_impl->mouseWheelTriggerCount % 60) == 0) {
+                const short raw = static_cast<short>(HIWORD(wParam));
+                std::fprintf(stderr,
+                    "[AYDevice-InputTrace] WM_MOUSEWHEEL fire #%d delta=%d\n",
+                    _impl->mouseWheelTriggerCount, static_cast<int>(raw));
+            }
+        }
         if (_impl->onMouseWheel) {
             const short raw = static_cast<short>(HIWORD(wParam));
             _impl->onMouseWheel(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
         }
         break;
+
+    // PR-InputTrace: WM_POINTERUPDATE is what Windows Precision
+    // trackpads (Dell/HP/Lenovo/Surface) deliver for two-finger
+    // gestures. POINTER_INFO::ptPixelLocation is screen-space;
+    // POINTER_INFO::dwTime / pointerId / pointerFlags are diagnostic.
+    // No wheel parsing yet — this case only counts fires for path
+    // identification. Once we know the trigger rate + field semantics
+    // for the user's trackpad we can implement POINTER_PEN_INFO
+    // wheel delta extraction. Until then this is diagnostic-only.
+    case WM_POINTERUPDATE: {
+        if (ayDeviceTraceInputEnabled()) {
+            ++_impl->pointerTriggerCount;
+            if (_impl->pointerTriggerCount == 1 ||
+                (_impl->pointerTriggerCount % 60) == 0) {
+                std::fprintf(stderr,
+                    "[AYDevice-InputTrace] WM_POINTERUPDATE fire #%d wParam=0x%p\n",
+                    _impl->pointerTriggerCount,
+                    reinterpret_cast<void*>(wParam));
+            }
+        }
+        break;
+    }
+
+    // PR-InputTrace: WM_GESTURE fires for pinch / rotate / two-finger
+    // pan on Precision trackpads. GID_PAN == 4 carries panDeltaX/Y
+    // which is fractional pixels. Diagnostic-only for now.
+    case WM_GESTURE: {
+        if (ayDeviceTraceInputEnabled()) {
+            ++_impl->gestureTriggerCount;
+            if (_impl->gestureTriggerCount == 1 ||
+                (_impl->gestureTriggerCount % 60) == 0) {
+                std::fprintf(stderr,
+                    "[AYDevice-InputTrace] WM_GESTURE fire #%d wParam=0x%p lParam=0x%p\n",
+                    _impl->gestureTriggerCount,
+                    reinterpret_cast<void*>(wParam),
+                    reinterpret_cast<void*>(lParam));
+            }
+        }
+        break;
+    }
 
     // ===== Raw-input mouse wheel (PR-InputTrace) =====
     // Windows precision trackpad / MagicMouse deliver wheel deltas via
@@ -1134,6 +1221,19 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                               sizeof(RAWINPUTHEADER)) != dwSize) break;
         auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
         if (raw->header.dwType != RIM_TYPEMOUSE) break;
+        if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)) {
+            if (ayDeviceTraceInputEnabled()) {
+                ++_impl->rawInputTriggerCount;
+                if (_impl->rawInputTriggerCount == 1 ||
+                    (_impl->rawInputTriggerCount % 60) == 0) {
+                    const short wheelDelta =
+                        static_cast<short>(raw->data.mouse.usButtonData);
+                    std::fprintf(stderr,
+                        "[AYDevice-InputTrace] WM_INPUT RI_MOUSE_WHEEL fire #%d delta=%d\n",
+                        _impl->rawInputTriggerCount, static_cast<int>(wheelDelta));
+                }
+            }
+        }
         if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) && _impl->onMouseWheel) {
             const short wheelDelta =
                 static_cast<short>(raw->data.mouse.usButtonData);
