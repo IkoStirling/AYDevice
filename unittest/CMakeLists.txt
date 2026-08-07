@@ -13,6 +13,8 @@ add_executable(${TEST_NAME}
     Test_DeviceEventBridge.cpp
     # D5 (2026-07-26): WindowManager::createTopLevelWindow.
     Test_WindowManager_TopLevel.cpp
+    # PR-InputTrace (2026-08-07): raw-input wheel bridge parser.
+    Test_RawInputBridge.cpp
 )
 
 target_include_directories(${TEST_NAME} PRIVATE

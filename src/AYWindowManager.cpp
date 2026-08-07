@@ -101,6 +101,10 @@ struct WindowManager::Impl {
     CompositionCallback onComposition;
     bool touchEnabled = false;
     bool touchRegistered = false;
+    // PR-InputTrace: precision trackpad / MagicMouse wheel goes through
+    // WM_INPUT (raw input) instead of WM_MOUSEWHEEL. Registered once per
+    // window in createWindow; unregistered in destroyWindow.
+    bool rawInputRegistered = false;
 
     // WM_CHAR delivers UTF-16; a leading high surrogate is held until its pair.
     wchar_t pendingHighSurrogate = 0;
@@ -450,6 +454,24 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
         }
     }
 
+    // PR-InputTrace: register raw-input devices for the window. Without
+    // this, Windows precision trackpad / MagicMouse wheel events never
+    // reach the message loop as WM_MOUSEWHEEL — they come through as
+    // WM_INPUT carrying fractional RAWMOUSE::usButtonData. RIDEV_INPUTSINK
+    // lets background windows still receive wheel events (Editor multi-
+    // window scenario). usagePage=0x01 / usage=0x02 = generic desktop
+    // mouse (the precision trackpad enumerates as a mouse-class device).
+    if (!_impl->rawInputRegistered) {
+        RAWINPUTDEVICE rid{};
+        rid.usUsagePage = 0x01;
+        rid.usUsage     = 0x02;
+        rid.dwFlags     = RIDEV_INPUTSINK;
+        rid.hwndTarget  = hwnd;
+        if (::RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
+            _impl->rawInputRegistered = true;
+        }
+    }
+
     if (info.hidden) {
         ShowWindow(hwnd, SW_HIDE);
     } else {
@@ -488,6 +510,18 @@ void WindowManager::destroyWindow()
         if (_impl->touchRegistered) {
             UnregisterTouchWindow(_impl->hwnd);
             _impl->touchRegistered = false;
+        }
+        // PR-InputTrace: unregister raw-input devices bound to this hwnd.
+        // Pass RIDEV_REMOVE with hwndTarget=NULL to drop the sink binding
+        // cleanly before DestroyWindow invalidates the HWND.
+        if (_impl->rawInputRegistered) {
+            RAWINPUTDEVICE rid{};
+            rid.usUsagePage = 0x01;
+            rid.usUsage     = 0x02;
+            rid.dwFlags     = RIDEV_REMOVE;
+            rid.hwndTarget  = nullptr;
+            ::RegisterRawInputDevices(&rid, 1, sizeof(rid));
+            _impl->rawInputRegistered = false;
         }
         DestroyWindow(_impl->hwnd);
         _impl->hwnd = nullptr;
@@ -1082,6 +1116,32 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
             _impl->onMouseWheel(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
         }
         break;
+
+    // ===== Raw-input mouse wheel (PR-InputTrace) =====
+    // Windows precision trackpad / MagicMouse deliver wheel deltas via
+    // WM_INPUT carrying RAWINPUT with RIM_TYPEMOUSE and the
+    // RI_MOUSE_WHEEL bit set in usButtonFlags. usButtonData is a signed
+    // SHORT whose magnitude is a multiple of WHEEL_DELTA (120). Same
+    // notches normalization as WM_MOUSEWHEEL.
+    case WM_INPUT: {
+        UINT dwSize = 0;
+        ::GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam),
+                          RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
+        if (dwSize == 0) break;
+        std::vector<BYTE> buf(dwSize);
+        if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam),
+                              RID_INPUT, buf.data(), &dwSize,
+                              sizeof(RAWINPUTHEADER)) != dwSize) break;
+        auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
+        if (raw->header.dwType != RIM_TYPEMOUSE) break;
+        if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL) && _impl->onMouseWheel) {
+            const short wheelDelta =
+                static_cast<short>(raw->data.mouse.usButtonData);
+            _impl->onMouseWheel(static_cast<float>(wheelDelta)
+                                / static_cast<float>(WHEEL_DELTA));
+        }
+        break;
+    }
 
     // ===== Touch (WM_TOUCH: decode contacts, map to client space) =====
     case WM_TOUCH:
