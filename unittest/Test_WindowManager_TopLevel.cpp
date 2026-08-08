@@ -77,6 +77,7 @@ TEST_CASE(test_top_level_create_destroy) {
     d.y      = 100;
     d.width  = 640;
     d.height = 480;
+    d.visible = false;   // keep the test runner silent
 
     void* h = nullptr;
     CHECK(windows.createTopLevelWindow(d, h));
@@ -110,9 +111,19 @@ TEST_CASE(test_top_level_resize_callback_fires) {
     d.title = "D5_Resize";
     d.width = 400;
     d.height = 300;
+    d.visible = false;   // keep the test runner silent
     void* h = nullptr;
     CHECK(windows.createTopLevelWindow(d, h));
     HWND hw = static_cast<HWND>(h);
+
+    // PR-Dock-TearOff: AdjustWindowRect — the CLIENT area must match the
+    // desc exactly (the promoted card is laid out in client space).
+    {
+        RECT rc{};
+        GetClientRect(hw, &rc);
+        CHECK(rc.right - rc.left == 400);
+        CHECK(rc.bottom - rc.top == 300);
+    }
 
     int reportedW = 0;
     int reportedH = 0;
@@ -147,6 +158,127 @@ TEST_CASE(test_top_level_resize_callback_fires) {
 }
 
 // -------------------------------------------------------------------------
+// 4. PR-Dock-TearOff input routing: typed callbacks fire from injected
+//    Win32 messages, with coordinate/key translation (client-relative
+//    floats, KeyCode, UTF-8 chars, wheel notches). SendMessage gives us
+//    synchronous dispatch — no pump needed.
+// -------------------------------------------------------------------------
+TEST_CASE(test_top_level_input_routing) {
+    WindowManager windows;
+    WindowCreateInfo info{};
+    info.width = 320;
+    info.height = 240;
+    info.hidden = true;
+    CHECK(windows.createWindow(info));
+
+    TopLevelWindowDesc d{};
+    d.title = "D5_Input";
+    d.width = 400;
+    d.height = 300;
+    d.visible = false;
+    void* h = nullptr;
+    CHECK(windows.createTopLevelWindow(d, h));
+    HWND hw = static_cast<HWND>(h);
+
+    int moveX = -1, moveY = -1, moveCount = 0;
+    int btnX = -1, btnY = -1, btnCode = -1, pressCount = 0, releaseCount = 0;
+    bool captured = false;
+    float wheelX = -1.0f, wheelY = -1.0f, wheelDelta = 0.0f;
+    int keyCount = 0;
+    bool tabDown = false, tabUp = false;
+    std::string charText;
+    int leaveCount = 0;
+
+    TopLevelWindowCallbacks cbs;
+    cbs.onMouseMove = [&](float x, float y) {
+        moveX = static_cast<int>(x);
+        moveY = static_cast<int>(y);
+        ++moveCount;
+    };
+    cbs.onMouseButton = [&](float x, float y, int button, bool pressed) {
+        btnX = static_cast<int>(x);
+        btnY = static_cast<int>(y);
+        btnCode = button;
+        if (pressed) {
+            ++pressCount;
+            return true;   // request capture
+        }
+        ++releaseCount;
+        return false;
+    };
+    cbs.onMouseWheel = [&](float x, float y, float deltaY) {
+        wheelX = x;
+        wheelY = y;
+        wheelDelta = deltaY;
+    };
+    cbs.onKey = [&](KeyCode key, bool pressed) {
+        ++keyCount;
+        if (key == KeyCode::Tab) {
+            tabDown = pressed;
+            tabUp = !pressed;
+        }
+    };
+    cbs.onChar = [&](const char* utf8, int byteCount) {
+        charText.assign(utf8, static_cast<size_t>(byteCount));
+    };
+    cbs.onMouseLeave = [&]() { ++leaveCount; };
+    windows.setTopLevelCallbacks(h, cbs);
+
+    // Mouse move — lParam is client coords.
+    SendMessage(hw, WM_MOUSEMOVE, 0, MAKELPARAM(12, 34));
+    CHECK(moveCount == 1);
+    CHECK(moveX == 12);
+    CHECK(moveY == 34);
+
+    // Button down requests capture → SetCapture; up releases.
+    SendMessage(hw, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(56, 78));
+    CHECK(pressCount == 1);
+    CHECK(btnX == 56);
+    CHECK(btnY == 78);
+    CHECK(btnCode == 0);
+    CHECK(GetCapture() == hw);
+    SendMessage(hw, WM_LBUTTONUP, 0, MAKELPARAM(56, 78));
+    CHECK(releaseCount == 1);
+    CHECK(GetCapture() != hw);
+
+    // Wheel — lParam is SCREEN coords; window sits at the OS default
+    // position, so use its actual screen rect to compute a point inside.
+    RECT winRc{};
+    GetWindowRect(hw, &winRc);
+    const POINT inside{winRc.left + 5, winRc.top + 5};
+    SendMessage(hw, WM_MOUSEWHEEL,
+                MAKEWPARAM(0, static_cast<WORD>(-WHEEL_DELTA)),
+                MAKELPARAM(inside.x, inside.y));
+    CHECK(wheelDelta == -1.0f);   // one notch down, normalized
+    {
+        POINT check = inside;
+        ScreenToClient(hw, &check);
+        CHECK(wheelX == static_cast<float>(check.x));
+        CHECK(wheelY == static_cast<float>(check.y));
+    }
+
+    // Keyboard — VK_TAB maps to KeyCode::Tab; repeat bit 30 suppressed.
+    SendMessage(hw, WM_KEYDOWN, VK_TAB, 0);
+    CHECK(tabDown);
+    SendMessage(hw, WM_KEYDOWN, VK_TAB, (1L << 30));  // repeat → suppressed
+    CHECK(keyCount == 1);
+    SendMessage(hw, WM_KEYUP, VK_TAB, 0);
+    CHECK(tabUp);
+    CHECK(keyCount == 2);
+
+    // Text — WM_CHAR 'A' → UTF-8 "A".
+    SendMessage(hw, WM_CHAR, L'A', 0);
+    CHECK(charText == "A");
+
+    // Leave-notify.
+    SendMessage(hw, WM_MOUSELEAVE, 0, 0);
+    CHECK(leaveCount == 1);
+
+    windows.destroyTopLevelWindow(h);
+    windows.destroyWindow();
+}
+
+// -------------------------------------------------------------------------
 // 3. Close-requested callback fires on WM_CLOSE. SendMessage is the
 //    documented way to inject a close — and our thunk suppresses the
 //    default DestroyWindow path (returns 0) so the test can verify
@@ -164,6 +296,7 @@ TEST_CASE(test_top_level_close_requested_callback) {
     d.title = "D5_Close";
     d.width = 400;
     d.height = 300;
+    d.visible = false;   // keep the test runner silent
     void* h = nullptr;
     CHECK(windows.createTopLevelWindow(d, h));
     HWND hw = static_cast<HWND>(h);

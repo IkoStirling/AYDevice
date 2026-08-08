@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AYInputTypes.h"   // KeyCode for TopLevelWindowCallbacks::onKey
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -41,15 +42,42 @@ struct TopLevelWindowDesc {
     int  y = -1;
     int  width  = 1024;
     int  height = 720;
+    // PR-Dock-TearOff: whether the window is shown immediately after
+    // creation. Default true; tests and hosts that want to prepare the
+    // surface first (e.g. attach a render backend before the first
+    // paint) pass false. Off-screen HWNDs are still created with their
+    // requested client size (AdjustWindowRect) so a backend can bind.
+    bool visible = true;
 };
 
 // D5 — per-window callback map (independent of the main window's
 // single-WindowManager callbacks). Each top-level HWND keeps its
 // own resize + close-requested lambdas so editor child windows
 // close independently of the editor's primary window.
+//
+// PR-Dock-TearOff: typed input callbacks, Win32 translation stays in
+// AYDevice (mouse positions are client-relative floats, wheel delta is
+// normalized to notches like the main window path, keys are KeyCode).
+// The host forwards them into its own UIManager. Callbacks fire
+// outside the s_topLevelMu lock (copy-then-invoke, same as onResize).
 struct TopLevelWindowCallbacks {
     std::function<void(int /*width*/, int /*height*/)> onResize;          // fires from WM_SIZE
     std::function<void()>                              onCloseRequested;  // fires from WM_CLOSE
+
+    // ===== PR-Dock-TearOff input routing =====
+    // All coordinates are client-relative to this window.
+    std::function<void(float /*x*/, float /*y*/)> onMouseMove;   // WM_MOUSEMOVE
+    std::function<void()>                         onMouseLeave;  // WM_MOUSELEAVE
+    // button: 0=left, 1=right, 2=middle, 3=X1, 4=X2. Return true to
+    // request mouse capture (down only; up auto-releases).
+    std::function<bool(float /*x*/, float /*y*/, int /*button*/,
+                       bool /*pressed*/)>         onMouseButton;
+    std::function<void(float /*x*/, float /*y*/,
+                       float /*deltaY*/)>         onMouseWheel;  // notches, +up
+    // KeyCode is ayt::device::KeyCode (same namespace as this header).
+    std::function<void(KeyCode /*key*/, bool /*pressed*/)> onKey;
+    // Committed text, UTF-8, surrogate pairs already combined.
+    std::function<void(const char* /*utf8*/, int /*byteCount*/)> onChar;
 };
 
 using WindowCloseCallback = std::function<void()>;

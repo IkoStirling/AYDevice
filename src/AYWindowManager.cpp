@@ -217,6 +217,43 @@ std::unordered_map<HWND, WindowManager*> s_topLevelOwners;
 std::unordered_map<HWND, TopLevelWindowCallbacks> s_topLevelCallbacks;
 std::mutex s_topLevelMu;
 
+// TopLevelWndProc sits before the anonymous namespace holding
+// translateVirtualKey (defined ~90 lines below); declare it so the
+// keyboard routing in TopLevelWndProc can use it.
+KeyCode translateVirtualKey(WPARAM vk, LPARAM lParam);
+
+// Shared WM_CHAR decoding: UTF-16 unit stream → combined surrogate
+// pairs → UTF-8. The main window (processPlatformEvent) keeps its
+// pairing state in Impl::pendingHighSurrogate; each top-level child
+// window uses its own file-static below so interleaved input from
+// multiple windows can't cross-pair.
+void handleWmChar(wchar_t unit,
+                  const std::function<void(const char*, int)>& onChar,
+                  wchar_t& pendingHigh)
+{
+    if (unit >= 0xD800 && unit <= 0xDBFF) {
+        pendingHigh = unit;  // wait for low surrogate
+    } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
+        if (pendingHigh != 0) {
+            const wchar_t pair[2] = {pendingHigh, unit};
+            const std::string utf8 = wideToUtf8(pair, 2);
+            pendingHigh = 0;
+            if (!utf8.empty()) {
+                onChar(utf8.c_str(), static_cast<int>(utf8.size()));
+            }
+        }
+    } else if (unit >= 0x20 || unit == L'\t' || unit == L'\n' || unit == L'\r') {
+        // Skip other control chars (backspace/escape stay on the key path).
+        const std::string utf8 = wideToUtf8(&unit, 1);
+        if (!utf8.empty()) {
+            onChar(utf8.c_str(), static_cast<int>(utf8.size()));
+        }
+    }
+}
+
+// Per-top-level-window WM_CHAR pairing state (see handleWmChar).
+wchar_t s_topLevelPendingHigh = 0;
+
 LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     // WM_NCCREATE is delivered BEFORE WM_CREATE; we get the owner pointer
@@ -233,47 +270,136 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
 
     WindowManager* owner = windowFromHwnd(hwnd);
-    if (owner != nullptr) {
-        if (msg == WM_SIZE) {
-            // Read new client size; invoke callbacks from a map guarded by
-            // the same mutex as the owners map (to avoid iterator
-            // invalidation if a callback mutates s_topLevelCallbacks).
-            TopLevelWindowCallbacks cbs;
-            {
-                std::lock_guard<std::mutex> g(s_topLevelMu);
-                auto it = s_topLevelCallbacks.find(hwnd);
-                if (it != s_topLevelCallbacks.end()) {
-                    cbs = it->second;
-                }
-            }
-            if (cbs.onResize) {
-                int w = 0, h = 0;
-                readClientSize(hwnd, w, h);
-                cbs.onResize(w, h);
-            }
+    if (owner == nullptr) {
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
+    }
+
+    // Copy callbacks under the lock; invoke outside it (a callback may
+    // mutate s_topLevelCallbacks, e.g. onResize re-wiring the set).
+    TopLevelWindowCallbacks cbs;
+    {
+        std::lock_guard<std::mutex> g(s_topLevelMu);
+        auto it = s_topLevelCallbacks.find(hwnd);
+        if (it != s_topLevelCallbacks.end()) {
+            cbs = it->second;
+        }
+    }
+
+    switch (msg) {
+    case WM_SIZE: {
+        if (cbs.onResize) {
+            int w = 0, h = 0;
+            readClientSize(hwnd, w, h);
+            cbs.onResize(w, h);
+        }
+        return 0;
+    }
+    case WM_CLOSE:
+        if (cbs.onCloseRequested) {
+            cbs.onCloseRequested();
+            // Suppress default destruction — the host decides whether
+            // to DestroyWindow via closeChildWindow. If the host
+            // doesn't call it, the window will simply close through
+            // WM_CLOSE re-entry or be cleaned up by the WindowManager
+            // dtor (destroyAllTopLevelWindows).
             return 0;
         }
-        if (msg == WM_CLOSE) {
-            TopLevelWindowCallbacks cbs;
-            {
-                std::lock_guard<std::mutex> g(s_topLevelMu);
-                auto it = s_topLevelCallbacks.find(hwnd);
-                if (it != s_topLevelCallbacks.end()) {
-                    cbs = it->second;
+        // No callback registered — fall through to DefWindowProc which
+        // will trigger DestroyWindow.
+        break;
+
+    // ===== PR-Dock-TearOff input routing =====
+    // All mouse coordinates below are client-relative floats, matching
+    // the main-window callback contract. The host (editor child-window
+    // manager) forwards them into its own UIManager.
+
+    case WM_MOUSEMOVE:
+        if (cbs.onMouseMove) {
+            const int x = static_cast<short>(LOWORD(lParam));
+            const int y = static_cast<short>(HIWORD(lParam));
+            cbs.onMouseMove(static_cast<float>(x), static_cast<float>(y));
+        }
+        // (Re)arm the leave-notify so WM_MOUSELEAVE fires exactly once
+        // when the cursor exits. Idempotent; cheap enough per move.
+        {
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = hwnd;
+            ::TrackMouseEvent(&tme);
+        }
+        return 0;
+    case WM_MOUSELEAVE:
+        if (cbs.onMouseLeave) {
+            cbs.onMouseLeave();
+        }
+        return 0;
+    case WM_LBUTTONDOWN: case WM_RBUTTONDOWN: case WM_MBUTTONDOWN:
+    case WM_XBUTTONDOWN: case WM_LBUTTONUP: case WM_RBUTTONUP:
+    case WM_MBUTTONUP: case WM_XBUTTONUP: {
+        if (cbs.onMouseButton) {
+            const int x = static_cast<short>(LOWORD(lParam));
+            const int y = static_cast<short>(HIWORD(lParam));
+            const bool pressed = (msg & 0x1) != 0;  // *DOWN odd, *UP even
+            int button = 0;                     // 0=left, 1=right, 2=middle
+            switch (msg) {
+            case WM_RBUTTONDOWN: case WM_RBUTTONUP:   button = 1; break;
+            case WM_MBUTTONDOWN: case WM_MBUTTONUP:   button = 2; break;
+            case WM_XBUTTONDOWN: case WM_XBUTTONUP:
+                button = (HIWORD(wParam) == XBUTTON1) ? 3 : 4;
+                break;
+            default: break;
+            }
+            const bool wantCapture =
+                cbs.onMouseButton(static_cast<float>(x), static_cast<float>(y),
+                                  button, pressed);
+            if (pressed && wantCapture) {
+                ::SetCapture(hwnd);
+            } else if (!pressed) {
+                if (::GetCapture() == hwnd) {
+                    ::ReleaseCapture();
                 }
             }
-            if (cbs.onCloseRequested) {
-                cbs.onCloseRequested();
-                // Suppress default destruction — the host decides whether
-                // to DestroyWindow via closeChildWindow. If the host
-                // doesn't call it, the window will simply close through
-                // WM_CLOSE re-entry or be cleaned up by the WindowManager
-                // dtor (destroyAllTopLevelWindows).
-                return 0;
-            }
-            // No callback registered — fall through to DefWindowProc which
-            // will trigger DestroyWindow.
         }
+        return 0;
+    }
+    case WM_MOUSEWHEEL: {
+        if (cbs.onMouseWheel) {
+            POINT pt{static_cast<LONG>(LOWORD(lParam)),
+                     static_cast<LONG>(HIWORD(lParam))};
+            ::ScreenToClient(hwnd, &pt);  // lParam is screen coords
+            const short raw = static_cast<short>(HIWORD(wParam));
+            cbs.onMouseWheel(static_cast<float>(pt.x), static_cast<float>(pt.y),
+                             static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
+        }
+        return 0;
+    }
+    case WM_KEYDOWN:
+    case WM_SYSKEYDOWN:
+        if (cbs.onKey) {
+            const bool repeat = (lParam & (1 << 30)) != 0;  // bit 30 = previous key state
+            if (!repeat) {
+                cbs.onKey(translateVirtualKey(wParam, lParam), true);
+            }
+        }
+        return 0;
+    case WM_KEYUP:
+    case WM_SYSKEYUP:
+        if (cbs.onKey) {
+            cbs.onKey(translateVirtualKey(wParam, lParam), false);
+        }
+        return 0;
+    case WM_CHAR:
+        if (cbs.onChar) {
+            handleWmChar(static_cast<wchar_t>(wParam), cbs.onChar,
+                         s_topLevelPendingHigh);
+        }
+        return 0;
+    case WM_ERASEBKGND:
+        // GDI render backends repaint the full client surface every
+        // frame; let them, instead of letting the class background
+        // brush flash between frames (flicker).
+        return TRUE;
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -966,6 +1092,16 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
     // header); translate it back to the proper macro here.
     const int xPos = (desc.x < 0) ? CW_USEDEFAULT : desc.x;
     const int yPos = (desc.y < 0) ? CW_USEDEFAULT : desc.y;
+    // PR-Dock-TearOff: create the OS frame LARGER than the requested
+    // size so the CLIENT area matches desc (the promote frame is a card
+    // size; the host lays the card at (0,0) in the client). Without
+    // AdjustWindowRect the client comes out ~30px short and the card
+    // overflows.
+    RECT clientRect{0, 0, desc.width, desc.height};
+    ::AdjustWindowRect(&clientRect, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+                       FALSE);
+    const int wndW = clientRect.right - clientRect.left;
+    const int wndH = clientRect.bottom - clientRect.top;
     HWND hwnd = CreateWindowExW(
         0,
         kTopLevelWindowClass,
@@ -973,8 +1109,8 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
         WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
         xPos,
         yPos,
-        desc.width,
-        desc.height,
+        wndW,
+        wndH,
         nullptr,                    // top-level: no parent
         nullptr,                    // no menu
         _impl->instance,
@@ -982,6 +1118,10 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
 
     if (hwnd == nullptr) {
         return false;
+    }
+    if (desc.visible) {
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
     }
 
     {
@@ -1211,6 +1351,23 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
     // SHORT whose magnitude is a multiple of WHEEL_DELTA (120). Same
     // notches normalization as WM_MOUSEWHEEL.
     case WM_INPUT: {
+        // PR-Dock-TearOff wheel guard: RIDEV_INPUTSINK delivers raw
+        // input for EVERY window (top-level child windows included) to
+        // the main window. When the cursor is over a top-level child
+        // window, skip — the child window's own WM_MOUSEWHEEL path
+        // handles it. Without this guard the same wheel notch would be
+        // double-applied (child + main). IsChild covers any future
+        // WS_CHILD surfaces of the main window.
+        if (_impl->hwnd != nullptr) {
+            POINT pt{};
+            if (::GetCursorPos(&pt)) {
+                HWND under = ::WindowFromPoint(pt);
+                if (under != nullptr && under != _impl->hwnd &&
+                    !::IsChild(_impl->hwnd, under)) {
+                    break;
+                }
+            }
+        }
         UINT dwSize = 0;
         ::GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam),
                           RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
@@ -1276,25 +1433,8 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
     // ===== Text: committed characters (UTF-16 -> UTF-8, surrogate-aware) =====
     case WM_CHAR:
         if (_impl->onChar) {
-            const wchar_t unit = static_cast<wchar_t>(wParam);
-            if (unit >= 0xD800 && unit <= 0xDBFF) {
-                _impl->pendingHighSurrogate = unit;  // wait for low surrogate
-            } else if (unit >= 0xDC00 && unit <= 0xDFFF) {
-                if (_impl->pendingHighSurrogate != 0) {
-                    const wchar_t pair[2] = {_impl->pendingHighSurrogate, unit};
-                    const std::string utf8 = wideToUtf8(pair, 2);
-                    _impl->pendingHighSurrogate = 0;
-                    if (!utf8.empty()) {
-                        _impl->onChar(utf8.c_str(), static_cast<int>(utf8.size()));
-                    }
-                }
-            } else if (unit >= 0x20 || unit == L'\t' || unit == L'\n' || unit == L'\r') {
-                // Skip other control chars (backspace/escape stay on the key path).
-                const std::string utf8 = wideToUtf8(&unit, 1);
-                if (!utf8.empty()) {
-                    _impl->onChar(utf8.c_str(), static_cast<int>(utf8.size()));
-                }
-            }
+            handleWmChar(static_cast<wchar_t>(wParam), _impl->onChar,
+                         _impl->pendingHighSurrogate);
         }
         break;
 
