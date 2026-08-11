@@ -48,6 +48,15 @@ struct TopLevelWindowDesc {
     // paint) pass false. Off-screen HWNDs are still created with their
     // requested client size (AdjustWindowRect) so a backend can bind.
     bool visible = true;
+    // When true: WS_POPUP with no OS caption/menu — the host paints its
+    // own chrome (DockCard title bar). Client size equals width×height
+    // exactly when resizable=false (no AdjustWindowRect). Default false
+    // keeps classic WS_OVERLAPPEDWINDOW for config-file child windows.
+    bool borderless = false;
+    // Borderless + resizable → WS_POPUP|WS_THICKFRAME so edges/corners
+    // resize the HWND (Gallery/Editor tear-off). Ignored when
+    // borderless=false (WS_OVERLAPPEDWINDOW already includes a frame).
+    bool resizable = false;
 };
 
 // D5 — per-window callback map (independent of the main window's
@@ -78,6 +87,10 @@ struct TopLevelWindowCallbacks {
     std::function<void(KeyCode /*key*/, bool /*pressed*/)> onKey;
     // Committed text, UTF-8, surrogate pairs already combined.
     std::function<void(const char* /*utf8*/, int /*byteCount*/)> onChar;
+    // WM_SETCURSOR: return true if the host applied a cursor (skip
+    // DefWindowProc). Used so promoted DockCard title bars can show
+    // Move/Hand hints — Gallery's primary HWND does this itself.
+    std::function<bool()> onSetCursor;
 };
 
 using WindowCloseCallback = std::function<void()>;

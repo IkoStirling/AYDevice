@@ -340,7 +340,12 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         if (cbs.onMouseButton) {
             const int x = static_cast<short>(LOWORD(lParam));
             const int y = static_cast<short>(HIWORD(lParam));
-            const bool pressed = (msg & 0x1) != 0;  // *DOWN odd, *UP even
+            // Do NOT use (msg & 1): WM_RBUTTONDOWN=0x0204 is even, so that
+            // trick inverted right/middle press state and broke child-window
+            // button routing after dock tear-off.
+            const bool pressed =
+                (msg == WM_LBUTTONDOWN || msg == WM_RBUTTONDOWN ||
+                 msg == WM_MBUTTONDOWN || msg == WM_XBUTTONDOWN);
             int button = 0;                     // 0=left, 1=right, 2=middle
             switch (msg) {
             case WM_RBUTTONDOWN: case WM_RBUTTONUP:   button = 1; break;
@@ -400,6 +405,20 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         // frame; let them, instead of letting the class background
         // brush flash between frames (flicker).
         return TRUE;
+    case WM_PAINT: {
+        // Validate without filling. DefWindowProc + class brush would
+        // flash COLOR_WINDOW between our GetDC/BitBlt frames and make
+        // promoted dock windows look low-FPS / strobing.
+        PAINTSTRUCT ps{};
+        BeginPaint(hwnd, &ps);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    case WM_SETCURSOR:
+        if (cbs.onSetCursor && cbs.onSetCursor()) {
+            return TRUE;
+        }
+        break;
     }
 
     return DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -412,7 +431,9 @@ bool registerTopLevelWindowClass(HINSTANCE instance)
     wc.style = CS_HREDRAW | CS_VREDRAW;
     wc.hInstance = instance;
     wc.hCursor = LoadCursor(nullptr, IDC_ARROW);
-    wc.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
+    // No class background — host GDI backends own the client pixels.
+    // A COLOR_WINDOW brush raced WM_PAINT against per-frame GetDC paint.
+    wc.hbrBackground = nullptr;
     wc.lpszClassName = kTopLevelWindowClass;
     wc.lpfnWndProc = TopLevelWndProc;
 
@@ -1092,21 +1113,35 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
     // header); translate it back to the proper macro here.
     const int xPos = (desc.x < 0) ? CW_USEDEFAULT : desc.x;
     const int yPos = (desc.y < 0) ? CW_USEDEFAULT : desc.y;
-    // PR-Dock-TearOff: create the OS frame LARGER than the requested
-    // size so the CLIENT area matches desc (the promote frame is a card
-    // size; the host lays the card at (0,0) in the client). Without
-    // AdjustWindowRect the client comes out ~30px short and the card
-    // overflows.
-    RECT clientRect{0, 0, desc.width, desc.height};
-    ::AdjustWindowRect(&clientRect, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
-                       FALSE);
-    const int wndW = clientRect.right - clientRect.left;
-    const int wndH = clientRect.bottom - clientRect.top;
+    // Bordered: grow the OS frame so CLIENT == desc size (promote card
+    // fits without overflow). Borderless: WS_POPUP, no caption — size
+    // is already client pixels (DockCard paints its own title chrome).
+    DWORD style = WS_CLIPCHILDREN;
+    int wndW = desc.width;
+    int wndH = desc.height;
+    if (desc.borderless) {
+        style |= WS_POPUP;
+        if (desc.resizable) {
+            // Thick frame gives OS edge/corner resize without a caption.
+            // Grow the outer HWND so CLIENT stays desc.width×height.
+            style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+            RECT clientRect{0, 0, desc.width, desc.height};
+            ::AdjustWindowRectEx(&clientRect, style, FALSE, 0);
+            wndW = clientRect.right - clientRect.left;
+            wndH = clientRect.bottom - clientRect.top;
+        }
+    } else {
+        style |= WS_OVERLAPPEDWINDOW;
+        RECT clientRect{0, 0, desc.width, desc.height};
+        ::AdjustWindowRect(&clientRect, style, FALSE);
+        wndW = clientRect.right - clientRect.left;
+        wndH = clientRect.bottom - clientRect.top;
+    }
     HWND hwnd = CreateWindowExW(
         0,
         kTopLevelWindowClass,
         title.c_str(),
-        WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
+        style,
         xPos,
         yPos,
         wndW,
