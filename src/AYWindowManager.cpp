@@ -215,6 +215,9 @@ const wchar_t* kTopLevelWindowClass = L"AYDeviceTopLevelWindow";
 // GetMessage/DispatchMessage loop without UAF.
 std::unordered_map<HWND, WindowManager*> s_topLevelOwners;
 std::unordered_map<HWND, TopLevelWindowCallbacks> s_topLevelCallbacks;
+// borderless+resizable: need custom WM_NCHITTEST (thick-frame alone is
+// not enough once the frame is absorbed into the client area).
+std::unordered_map<HWND, bool> s_topLevelBorderlessResizable;
 std::mutex s_topLevelMu;
 
 // TopLevelWndProc sits before the anonymous namespace holding
@@ -286,6 +289,43 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
 
     switch (msg) {
+    case WM_NCHITTEST: {
+        bool borderlessResizable = false;
+        {
+            std::lock_guard<std::mutex> g(s_topLevelMu);
+            auto it = s_topLevelBorderlessResizable.find(hwnd);
+            borderlessResizable =
+                (it != s_topLevelBorderlessResizable.end() && it->second);
+        }
+        if (!borderlessResizable) {
+            break;
+        }
+        // Custom edge/corner hit-test: WS_POPUP|WS_THICKFRAME still needs
+        // this because the visible chrome is entirely client-painted.
+        POINT pt{static_cast<LONG>(static_cast<short>(LOWORD(lParam))),
+                 static_cast<LONG>(static_cast<short>(HIWORD(lParam)))};
+        RECT rc{};
+        ::GetWindowRect(hwnd, &rc);
+        constexpr int kBand = 8;
+        constexpr int kTopBtnStrip = 48; // maximize + close chrome
+        const bool onLeft   = pt.x >= rc.left && pt.x < rc.left + kBand;
+        const bool onRight  = pt.x < rc.right && pt.x >= rc.right - kBand;
+        const bool onTop    = pt.y >= rc.top && pt.y < rc.top + kBand;
+        const bool onBottom = pt.y < rc.bottom && pt.y >= rc.bottom - kBand;
+        // Keep title-bar host buttons (口 / x) as client hits.
+        if (onTop && pt.x >= rc.right - kTopBtnStrip) {
+            return HTCLIENT;
+        }
+        if (onTop && onLeft)     return HTTOPLEFT;
+        if (onTop && onRight)    return HTTOPRIGHT;
+        if (onBottom && onLeft)  return HTBOTTOMLEFT;
+        if (onBottom && onRight) return HTBOTTOMRIGHT;
+        if (onLeft)              return HTLEFT;
+        if (onRight)             return HTRIGHT;
+        if (onTop)               return HTTOP;
+        if (onBottom)            return HTBOTTOM;
+        return HTCLIENT;
+    }
     case WM_SIZE: {
         if (cbs.onResize) {
             int w = 0, h = 0;
@@ -1122,8 +1162,11 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
     if (desc.borderless) {
         style |= WS_POPUP;
         if (desc.resizable) {
-            // Thick frame gives OS edge/corner resize without a caption.
-            // Grow the outer HWND so CLIENT stays desc.width×height.
+            // Thick frame + custom WM_NCHITTEST for edge resize.
+            // Do NOT use WM_NCCALCSIZE→0 with THICKFRAME: Windows then
+            // re-adds frame chrome and grows the HWND every pass
+            // (Gallery: pure-white child → crash after promote).
+            // Outer size includes the frame; client stays desc sized.
             style |= WS_THICKFRAME | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
             RECT clientRect{0, 0, desc.width, desc.height};
             ::AdjustWindowRectEx(&clientRect, style, FALSE, 0);
@@ -1154,6 +1197,28 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
     if (hwnd == nullptr) {
         return false;
     }
+    if (desc.borderless && desc.resizable) {
+        // Win11: square corners + dark NC/border so the thick-frame
+        // chrome does not flash as a white top strip (DWM defaults).
+        constexpr DWORD kDwmwaWindowCornerPreference = 33;
+        constexpr DWORD kDwmwcpDoNotRound = 1;
+        constexpr DWORD kDwmwaBorderColor = 34;
+        constexpr DWORD kDwmwaCaptionColor = 35;
+        DWORD cornerPref = kDwmwcpDoNotRound;
+        COLORREF frameColor = RGB(0x28, 0x28, 0x2A);
+        using DwmSetWindowAttributeFn =
+            HRESULT (WINAPI*)(HWND, DWORD, LPCVOID, DWORD);
+        if (HMODULE dwm = ::LoadLibraryW(L"dwmapi.dll")) {
+            if (auto* fn = reinterpret_cast<DwmSetWindowAttributeFn>(
+                    ::GetProcAddress(dwm, "DwmSetWindowAttribute"))) {
+                fn(hwnd, kDwmwaWindowCornerPreference, &cornerPref,
+                   sizeof(cornerPref));
+                fn(hwnd, kDwmwaBorderColor, &frameColor, sizeof(frameColor));
+                fn(hwnd, kDwmwaCaptionColor, &frameColor, sizeof(frameColor));
+            }
+            ::FreeLibrary(dwm);
+        }
+    }
     if (desc.visible) {
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
@@ -1163,6 +1228,8 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
         std::lock_guard<std::mutex> g(s_topLevelMu);
         s_topLevelOwners[hwnd] = this;
         s_topLevelCallbacks[hwnd] = TopLevelWindowCallbacks{};
+        s_topLevelBorderlessResizable[hwnd] =
+            (desc.borderless && desc.resizable);
     }
     _impl->topLevelWindows.push_back(hwnd);
     outHandle = static_cast<void*>(hwnd);
@@ -1186,6 +1253,7 @@ void WindowManager::destroyTopLevelWindow(void* handle)
         std::lock_guard<std::mutex> g(s_topLevelMu);
         s_topLevelCallbacks.erase(hwnd);
         s_topLevelOwners.erase(hwnd);
+        s_topLevelBorderlessResizable.erase(hwnd);
     }
     auto it = std::find(_impl->topLevelWindows.begin(), _impl->topLevelWindows.end(), hwnd);
     if (it != _impl->topLevelWindows.end()) {
@@ -1212,6 +1280,7 @@ void WindowManager::destroyAllTopLevelWindows()
         for (HWND hwnd : windows) {
             s_topLevelCallbacks.erase(hwnd);
             s_topLevelOwners.erase(hwnd);
+            s_topLevelBorderlessResizable.erase(hwnd);
         }
     }
     for (HWND hwnd : _impl->topLevelWindows) {
@@ -1236,6 +1305,56 @@ void WindowManager::setTopLevelCallbacks(void* handle, const TopLevelWindowCallb
 #else
     (void)handle;
     (void)cbs;
+#endif
+}
+
+bool WindowManager::setTopLevelVisible(void* handle, bool visible)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return false;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    const BOOL ok = ::ShowWindow(hwnd, visible ? SW_SHOW : SW_HIDE);
+    if (visible) {
+        ::UpdateWindow(hwnd);
+    }
+    // ShowWindow's BOOL is "was previously visible", not success.
+    return ::IsWindowVisible(hwnd) == (visible ? TRUE : FALSE) || ok != 0;
+#else
+    (void)handle;
+    (void)visible;
+    return false;
+#endif
+}
+
+bool WindowManager::toggleTopLevelMaximized(void* handle)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return false;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    if (::IsZoomed(hwnd)) {
+        return ::ShowWindow(hwnd, SW_RESTORE) != 0;
+    }
+    return ::ShowWindow(hwnd, SW_MAXIMIZE) != 0;
+#else
+    (void)handle;
+    return false;
+#endif
+}
+
+bool WindowManager::isTopLevelMaximized(void* handle) const
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return false;
+    }
+    return ::IsZoomed(static_cast<HWND>(handle)) != 0;
+#else
+    (void)handle;
+    return false;
 #endif
 }
 

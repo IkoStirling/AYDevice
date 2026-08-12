@@ -79,6 +79,13 @@ public:
     void destroyTopLevelWindow(void* handle);
     void destroyAllTopLevelWindows();
     void setTopLevelCallbacks(void* handle, const TopLevelWindowCallbacks& cbs);
+    // Show/hide after create. Promote hosts create with visible=false,
+    // paint the first GDI frame, then show — avoids a white flash.
+    bool setTopLevelVisible(void* handle, bool visible);
+
+    // Borderless+resizable child hosts: toggle OS maximize / restore.
+    bool toggleTopLevelMaximized(void* handle);
+    bool isTopLevelMaximized(void* handle) const;
 
     // Platform message hook (Win32 wndproc / SDL window events).
     void processPlatformEvent(unsigned msg, std::uintptr_t wParam, std::intptr_t lParam);
