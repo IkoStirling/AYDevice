@@ -4,13 +4,41 @@
 
 #include <AYAppEventHost.h>
 #include <ayevent/EventBus.h>
+#include <ayevent/Events/DeviceEvents.h>
 #include <ayevent/Events/WindowEvents.h>
+
+#include <cstdint>
+#include <string_view>
 
 namespace ayt::device {
 
 namespace {
 DeviceConfig g_bootstrapConfig{};
+
+// Stable FNV-1a 32-bit of the action name → DeviceActionEvent::actionId.
+int actionIdFromName(std::string_view name)
+{
+    uint32_t h = 2166136261u;
+    for (unsigned char c : name) {
+        h ^= c;
+        h *= 16777619u;
+    }
+    return static_cast<int>(h);
 }
+
+void postActionEdges(InputMapping& mapping)
+{
+    auto& bus = ayt::event::EventBus::instance();
+    mapping.forEachAction([&](std::string_view name) {
+        if (mapping.isActionJustPressed(name)) {
+            bus.post(ayt::event::DeviceActionEvent{actionIdFromName(name), true});
+        }
+        if (mapping.isActionJustReleased(name)) {
+            bus.post(ayt::event::DeviceActionEvent{actionIdFromName(name), false});
+        }
+    });
+}
+} // namespace
 
 void DeviceSubSystem::setBootstrapConfig(const DeviceConfig& config)
 {
@@ -60,6 +88,9 @@ void DeviceSubSystem::update(float /*deltaTime*/)
     // (resizes, close requests) have already been latched.
     _devices.pollEvents();
 
+    // Discrete Action edges → EventBus (continuous axes stay off-bus).
+    publishPendingInputEvents();
+
     auto& window = _devices.window();
     if (!window.isWindowValid()) {
         return;
@@ -101,6 +132,14 @@ void DeviceSubSystem::shutdown()
     // touching this file again).
     _events.disconnect();
     _ready = false;
+}
+
+void DeviceSubSystem::publishPendingInputEvents()
+{
+    if (!_ready) {
+        return;
+    }
+    postActionEdges(_devices.mapping());
 }
 
 DeviceSubSystem* DeviceSubSystem::findRegistered()

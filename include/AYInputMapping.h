@@ -55,6 +55,14 @@ public:
     bool hasAction(std::string_view action) const;
     bool hasAxis(std::string_view axis) const;
 
+    /// Visit every bound action name (for Device→EventBus edge fan-out).
+    template<typename Fn>
+    void forEachAction(Fn&& fn) const {
+        for (const auto& kv : _actions) {
+            fn(std::string_view(kv.first));
+        }
+    }
+
     // M1 (2026-07-15): thin 2-axis wrapper. Convention:
     //   bindAxis2D("move", "move_x", "move_y")
     // declares that the named 2-axis is composed of two already-bound

@@ -91,6 +91,16 @@ if (auto* dev = DeviceSubSystem::findRegistered()) {
 Kept in a separate target so the core `AYDevice` library stays free of the
 `AYGameLoop` dependency — the editor uses `DeviceManager` directly without the loop.
 
+## EventBus producers (DeviceSubSystem)
+
+| Event | When |
+|-------|------|
+| `WindowResizeEvent` | Window size delta after `pollEvents` |
+| `WindowCloseEvent` | Close requested |
+| `DeviceActionEvent` | Bound InputMapping **just-pressed** / **just-released** (`actionId` = FNV-1a of action name) |
+
+**Not** posted: continuous axes / mouse deltas (`DeviceAxisEvent` catalog exists but stays off-bus by design). See [`../AYEventSystem/README.md`](../AYEventSystem/README.md).
+
 ### Handing the window to the renderer
 
 `DeviceSubSystem::makeWindowProvider()` returns a `std::function<bool(void*&,

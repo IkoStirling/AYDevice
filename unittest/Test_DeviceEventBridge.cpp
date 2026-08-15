@@ -1,12 +1,12 @@
-// AYDevice/unittest/Test_DeviceEventBridge.cpp
+﻿// AYDevice/unittest/Test_DeviceEventBridge.cpp
 //
-// INT-03 (2026-07-20) — DeviceSubSystem → EventBus bridge tests.
+// INT-03 (2026-07-20) 鈥?DeviceSubSystem 鈫?EventBus bridge tests.
 //
 // The DeviceSubSystem posts `WindowResizeEvent` / `WindowCloseEvent` onto
 // the process-wide EventBus each update() when a window state delta is
 // detected. These tests verify both paths using the explicit notify API
 // (`notifyResized` / `notifyClosed`) so we don't need a real SDL window
-// in CI. Tests share the process-singleton EventBus — each test uses a
+// in CI. Tests share the process-singleton EventBus 鈥?each test uses a
 // hand-picked event type for delta testing so other suites (and the
 // DeviceSubSystem's own WindowResize/Close events) don't trip the
 // listener-count baselines.
@@ -16,9 +16,11 @@
 
 #include <AYAppEventHost.h>
 #include <ayevent/EventBus.h>
+#include <ayevent/Events/DeviceEvents.h>
 #include <ayevent/Events/WindowEvents.h>
 
 #include <atomic>
+#include <span>
 #include <utility>
 
 using namespace ayt::device;
@@ -61,7 +63,7 @@ TEST_CASE(Bridge_WindowResize_PostsOnSizeDelta) {
 
     // Snapshot the initial dimensions seeded by initialize() so the first
     // update() does NOT emit (no delta). Use a synthetic probe event to
-    // count updates independent of resize delta — a probe per frame lets
+    // count updates independent of resize delta 鈥?a probe per frame lets
     // us assert "no resize posted on the seed frame" because the only
     // way to make a resize event fire is a notifyResized() that changes
     // the dimension.
@@ -85,7 +87,7 @@ TEST_CASE(Bridge_WindowResize_PostsOnSizeDelta) {
             lastH = e.height;
         });
 
-    // Frame 1: seed — no resize delta expected.
+    // Frame 1: seed 鈥?no resize delta expected.
     sub.update(0.016f);
     bus.pump();
     bus.post(BridgeProbeEvent{1});
@@ -103,7 +105,7 @@ TEST_CASE(Bridge_WindowResize_PostsOnSizeDelta) {
     CHECK_INT_EQ(lastW, 640);
     CHECK_INT_EQ(lastH, 480);
 
-    // No further change — no further event.
+    // No further change 鈥?no further event.
     sub.update(0.016f);
     bus.pump();
     CHECK_INT_EQ(resizeCount.load(), 1);
@@ -131,7 +133,7 @@ TEST_CASE(Bridge_WindowClose_PostsOnConsumeCloseRequested) {
             closeCount.fetch_add(1);
         });
 
-    // Frame 1: no close requested — no event.
+    // Frame 1: no close requested 鈥?no event.
     sub.update(0.016f);
     bus.pump();
     CHECK_INT_EQ(closeCount.load(), 0);
@@ -143,7 +145,7 @@ TEST_CASE(Bridge_WindowClose_PostsOnConsumeCloseRequested) {
     bus.pump();
     CHECK_INT_EQ(closeCount.load(), 1);
 
-    // consumeCloseRequested() is single-shot — next update() must NOT fire
+    // consumeCloseRequested() is single-shot 鈥?next update() must NOT fire
     // again unless notifyClosed() is called again.
     sub.update(0.016f);
     bus.pump();
@@ -163,7 +165,7 @@ TEST_CASE(Bridge_WindowClose_PostsOnConsumeCloseRequested) {
 
 TEST_CASE(Bridge_Shutdown_DisconnectsHostScope) {
     // Host-scope cleanup parity check: DeviceSubSystem owns an
-    // EventBusHostScope (_events) — even though it's empty today (the
+    // EventBusHostScope (_events) 鈥?even though it's empty today (the
     // bridge is a pure producer), shutdown() must drain it idempotently
     // without touching the bus. Pin this so a future listener addition
     // (e.g. gamepad hot-plug watcher) plugs in via _events.subscribe<T>()
@@ -179,7 +181,7 @@ TEST_CASE(Bridge_Shutdown_DisconnectsHostScope) {
     sub.update(0.016f);
     sub.update(0.016f);
 
-    // shutdown() must be idempotent and clean — no event posted by the
+    // shutdown() must be idempotent and clean 鈥?no event posted by the
     // scope itself (we assert the listenerCount baseline remains stable).
     sub.shutdown();
     sub.shutdown();  // idempotent
@@ -189,6 +191,59 @@ TEST_CASE(Bridge_Shutdown_DisconnectsHostScope) {
                  static_cast<int>(baseline));
 }
 
+TEST_CASE(Bridge_DeviceAction_PostsOnJustPressed) {
+    auto& bus = ayt::event::EventBus::instance();
+    bus.unsubscribeAll();
+
+    DeviceSubSystem::setBootstrapConfig(makeHiddenConfig("Bridge.Action", 200, 150));
+    DeviceSubSystem sub;
+    CHECK(sub.initialize());
+
+    KeyCode space = KeyCode::Space;
+    sub.manager().mapping().bindAction("Jump", std::span<const KeyCode>(&space, 1));
+
+    std::atomic<int> pressCount{0};
+    std::atomic<int> releaseCount{0};
+    ayt::app::EventBusHostScope scope;
+    scope.subscribe<ayt::event::DeviceActionEvent>(
+        [&](const ayt::event::DeviceActionEvent& e) {
+            if (e.pressed) {
+                pressCount.fetch_add(1);
+            } else {
+                releaseCount.fetch_add(1);
+            }
+        });
+
+    // Establish a clean edge baseline.
+    sub.manager().pollEvents();
+    sub.publishPendingInputEvents();
+    bus.pump();
+    CHECK_INT_EQ(pressCount.load(), 0);
+
+    // Inject after newFrame (inside pollEvents) so just-pressed is true.
+    sub.manager().pollEvents();
+    if (auto* kb = sub.manager().keyboard()) {
+        kb->onKeyDown(KeyCode::Space);
+    }
+    sub.publishPendingInputEvents();
+    bus.pump();
+    CHECK_INT_EQ(pressCount.load(), 1);
+    CHECK_INT_EQ(releaseCount.load(), 0);
+
+    sub.manager().pollEvents();
+    if (auto* kb = sub.manager().keyboard()) {
+        kb->onKeyUp(KeyCode::Space);
+    }
+    sub.publishPendingInputEvents();
+    bus.pump();
+    CHECK_INT_EQ(releaseCount.load(), 1);
+
+    scope.disconnect();
+    sub.shutdown();
+    bus.unsubscribeAll();
+}
+
 TEST_SUITE_END
 
 } // namespace ayt::device::test
+

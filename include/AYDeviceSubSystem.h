@@ -57,6 +57,11 @@ public:
     // REGISTER_SUBSYSTEM auto-init macro which can be stripped from a static lib).
     static void registerSubSystem();
 
+    /// Post InputMapping just-pressed/released as DeviceActionEvent.
+    /// Called from update() after pollEvents(); exposed so tests can inject
+    /// synthetic key edges between poll and publish without a real HWND pump.
+    void publishPendingInputEvents();
+
     // Window-source callback for RendererSubSystem. Signature matches
     // ayt::render::WindowProvider structurally (bool(void*&, uint32_t&,
     // uint32_t&)) so the two modules interoperate without a header dependency:
