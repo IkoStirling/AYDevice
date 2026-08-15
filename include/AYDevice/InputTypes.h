@@ -1,5 +1,5 @@
 #pragma once
-// AYInputTypes.h - Input device value types (keys, buttons, vectors)
+// AYDevice/InputTypes.h - Input device value types (keys, buttons, vectors)
 
 #include <cstdint>
 #include <functional>

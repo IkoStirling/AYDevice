@@ -1,8 +1,8 @@
 #pragma once
-// AYTouchDevice.h - Multi-touch contact tracking with per-frame phases
+// AYDevice/TouchDevice.h - Multi-touch contact tracking with per-frame phases
 
-#include "AYInputDevice.h"
-#include "AYInputTypes.h"
+#include "AYDevice/InputDevice.h"
+#include "AYDevice/InputTypes.h"
 
 #include <vector>
 

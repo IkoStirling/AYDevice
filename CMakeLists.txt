@@ -20,19 +20,19 @@ set(SOURCES
 
 set(HEADERS
     AYDevice.h
-    include/AYWindowTypes.h
-    include/AYWindowManager.h
-    include/AYDeviceManager.h
-    include/AYInputTypes.h
-    include/AYInputDevice.h
-    include/AYKeyboardDevice.h
-    include/AYMouseDevice.h
-    include/AYGamepadDevice.h
-    include/AYTouchDevice.h
-    include/AYTextInput.h
-    include/AYInputMapping.h
-    include/AYInputNames.h
-    include/AYInputProfile.h
+    include/AYDevice/WindowTypes.h
+    include/AYDevice/WindowManager.h
+    include/AYDevice/DeviceManager.h
+    include/AYDevice/InputTypes.h
+    include/AYDevice/InputDevice.h
+    include/AYDevice/KeyboardDevice.h
+    include/AYDevice/MouseDevice.h
+    include/AYDevice/GamepadDevice.h
+    include/AYDevice/TouchDevice.h
+    include/AYDevice/TextInput.h
+    include/AYDevice/InputMapping.h
+    include/AYDevice/InputNames.h
+    include/AYDevice/InputProfile.h
 )
 
 add_library(${PROJECT_NAME} STATIC ${SOURCES} ${HEADERS})
@@ -67,7 +67,7 @@ target_compile_options(${PROJECT_NAME} PRIVATE
 # nlohmann_json dependency chain; only consumers that persist bindings link it.
 add_library(AYDeviceConfig STATIC
     src/AYInputProfileConfig.cpp
-    include/AYInputProfileConfig.h
+    include/AYDevice/InputProfileConfig.h
 )
 
 target_include_directories(AYDeviceConfig PUBLIC
@@ -88,19 +88,19 @@ target_compile_options(AYDeviceConfig PRIVATE
 # dependency (the editor uses DeviceManager directly without the loop).
 add_library(AYDeviceSubSystem STATIC
     src/AYDeviceSubSystem.cpp
-    include/AYDeviceSubSystem.h
+    include/AYDevice/DeviceSubSystem.h
     # INT-02 (2026-07-15): DeviceInputProvider adapter — bridges
     # AYDevice InputMapping -> LogiaRuntimeBridge::InputProvider.
     # Lives in the SubSystem target (not AYDevice core) so the
     # core library stays free of the AYScript dependency by design.
     src/AYDeviceInputProvider.cpp
-    include/AYDeviceInputProvider.h
+    include/AYDevice/DeviceInputProvider.h
 )
 
 target_include_directories(AYDeviceSubSystem PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    # INT-03 (2026-07-20): Device->EventBus bridge. AYAppEventHost.h lives in
+    # INT-03 (2026-07-20): Device->EventBus bridge. AYApplication/AppEventHost.h lives in
     # AYApplication/interface — DeviceSubSystem consumes EventBusHostScope
     # to host its post<WindowResize/Close> producer + any future listener
     # ownership (Phase 4 §a8c8be9 lesson applied here too).
@@ -111,10 +111,10 @@ target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop
     # AYScript link provides LogiaRuntimeBridge::InputProvider pure-virtual
     # interface that DeviceInputProvider derives from. AYScript's transitive
     # deps (AYReflect, sol2) don't leak because we only consume the input
-    # seam — see AYScript/include/AYScriptRuntimeBridge.h:509.
+    # seam — see AYScript/include/AYScript/ScriptRuntimeBridge.h:509.
     PRIVATE AYScript
     # INT-03 (2026-07-20): EventBusHostScope lives in AYApplication
-    # (interface/AYAppEventHost.h). Linking AYApplication pulls the scope
+    # (interface/AYApplication/AppEventHost.h). Linking AYApplication pulls the scope
     # type + (transitively) AYEventSystem, which is the bus Device posts to.
     PRIVATE AYApplication)
 

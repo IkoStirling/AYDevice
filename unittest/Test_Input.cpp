@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYKeyboardDevice.h"
-#include "AYMouseDevice.h"
-#include "AYInputMapping.h"
+#include "AYDevice/KeyboardDevice.h"
+#include "AYDevice/MouseDevice.h"
+#include "AYDevice/InputMapping.h"
 
 using namespace ayt::device;
 

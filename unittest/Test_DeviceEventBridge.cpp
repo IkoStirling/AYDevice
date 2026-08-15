@@ -1,4 +1,4 @@
-﻿// AYDevice/unittest/Test_DeviceEventBridge.cpp
+// AYDevice/unittest/Test_DeviceEventBridge.cpp
 //
 // INT-03 (2026-07-20) 鈥?DeviceSubSystem 鈫?EventBus bridge tests.
 //
@@ -11,13 +11,13 @@
 // DeviceSubSystem's own WindowResize/Close events) don't trip the
 // listener-count baselines.
 
-#include "AYDeviceSubSystem.h"
+#include "AYDevice/DeviceSubSystem.h"
 #include "AYTest.h"
 
-#include <AYAppEventHost.h>
-#include <ayevent/EventBus.h>
-#include <ayevent/Events/DeviceEvents.h>
-#include <ayevent/Events/WindowEvents.h>
+#include <AYApplication/AppEventHost.h>
+#include <AYEventSystem/EventBus.h>
+#include <AYEventSystem/Events/DeviceEvents.h>
+#include <AYEventSystem/Events/WindowEvents.h>
 
 #include <atomic>
 #include <span>

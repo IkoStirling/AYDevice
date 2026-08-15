@@ -1,8 +1,8 @@
 #pragma once
-// AYMouseDevice.h - Mouse position, buttons, and wheel with per-frame edges
+// AYDevice/MouseDevice.h - Mouse position, buttons, and wheel with per-frame edges
 
-#include "AYInputDevice.h"
-#include "AYInputTypes.h"
+#include "AYDevice/InputDevice.h"
+#include "AYDevice/InputTypes.h"
 
 #include <array>
 

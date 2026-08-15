@@ -1033,26 +1033,26 @@ AYDevice/
 │       ├── AYDevice.h              # 主入口
 │       │
 │       ├── Core/
-│       │   ├── DeviceManager.h    # 管理器（窗口+设备）
-│       │   ├── WindowManager.h     # SDL2 窗口管理
-│       │   ├── IInputDevice.h     # 设备基类
-│       │   ├── KeyboardDevice.h   # 键盘
-│       │   ├── MouseDevice.h     # 鼠标
-│       │   ├── GamepadDevice.h   # 手柄
-│       │   ├── TouchDevice.h    # 触控
+│       │   ├── AYDevice/DeviceManager.h    # 管理器（窗口+设备）
+│       │   ├── AYDevice/WindowManager.h     # SDL2 窗口管理
+│       │   ├── AYDevice/InputDevice.h     # 设备基类
+│       │   ├── AYDevice/KeyboardDevice.h   # 键盘
+│       │   ├── AYDevice/MouseDevice.h     # 鼠标
+│       │   ├── AYDevice/GamepadDevice.h   # 手柄
+│       │   ├── AYDevice/TouchDevice.h    # 触控
 │       │   └── InputManager.h    # 输入管理器（废弃，合并到 DeviceManager）
 │       │
 │       ├── Mapping/
-│       │   └── InputMapping.h    # Action/Axis 映射
+│       │   └── AYDevice/InputMapping.h    # Action/Axis 映射
 │       │
 │       ├── XR/
 │       │   └── XRDevice.h        # OpenXR VR 设备
 │       │
 │       └── Features/
 │           ├── InputRecorder.h    # 录制回放
-│           ├── TextInput.h        # IME 文本输入
+│           ├── AYDevice/TextInput.h        # IME 文本输入
 │           ├── GestureRecognizer.h # 手势识别
-│           ├── InputProfile.h     # 玩家配置
+│           ├── AYDevice/InputProfile.h     # 玩家配置
 │           ├── HapticFeedback.h   # 触觉反馈
 │           ├── AimAssistance.h    # 瞄准辅助
 │           └── MotionInput.h      # 运动输入

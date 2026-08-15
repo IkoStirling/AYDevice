@@ -1,9 +1,9 @@
 // AYDeviceInputProvider.cpp - INT-02 (2026-07-15)
 
-#include "AYDeviceInputProvider.h"
+#include "AYDevice/DeviceInputProvider.h"
 
-#include "AYDeviceManager.h"
-#include "AYInputMapping.h"
+#include "AYDevice/DeviceManager.h"
+#include "AYDevice/InputMapping.h"
 
 #include <string>
 
@@ -43,7 +43,7 @@ float DeviceInputProvider::getAxisValue(const std::string& action) const
     // INT-03 (2026-07-15): Logia `input.axis(name)` reads
     // InputMapping::getAxisValue(name). Phase-2 already ships
     // bindAxis(KeyPair) / bindAxisGamepad(GamepadAxis) — see
-    // AYInputMapping.h:48-50. Unbound axes return 0.0f from
+    // AYDevice/InputMapping.h:48-50. Unbound axes return 0.0f from
     // InputMapping; same default applies to a nullptr mgr here.
     // Range: keyboard KeyPair sums to [-1, 1] then * scale;
     // gamepad analog summed without scale (see AYInputMapping.cpp

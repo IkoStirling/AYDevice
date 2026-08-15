@@ -1,7 +1,7 @@
 #pragma once
-// AYInputProfile.h - Serializable player key bindings (rebind + apply to mapping)
+// AYDevice/InputProfile.h - Serializable player key bindings (rebind + apply to mapping)
 
-#include "AYInputTypes.h"
+#include "AYDevice/InputTypes.h"
 
 #include <string>
 #include <string_view>

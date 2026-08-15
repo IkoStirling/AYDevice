@@ -1,8 +1,8 @@
 #pragma once
-// AYGamepadDevice.h - Gamepad state via XInput (per-frame edge detection)
+// AYDevice/GamepadDevice.h - Gamepad state via XInput (per-frame edge detection)
 
-#include "AYInputDevice.h"
-#include "AYInputTypes.h"
+#include "AYDevice/InputDevice.h"
+#include "AYDevice/InputTypes.h"
 
 #include <array>
 #include <cstdint>

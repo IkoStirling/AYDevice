@@ -1,4 +1,4 @@
-#include "AYGamepadDevice.h"
+#include "AYDevice/GamepadDevice.h"
 
 #include <algorithm>
 #include <cmath>

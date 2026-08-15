@@ -1,7 +1,7 @@
 #pragma once
-// AYTextInput.h - Committed text + IME composition (UTF-8)
+// AYDevice/TextInput.h - Committed text + IME composition (UTF-8)
 
-#include "AYInputTypes.h"
+#include "AYDevice/InputTypes.h"
 
 #include <functional>
 #include <string>

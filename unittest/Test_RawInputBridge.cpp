@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYDeviceManager.h"
-#include "AYWindowManager.h"
+#include "AYDevice/DeviceManager.h"
+#include "AYDevice/WindowManager.h"
 
 // PR-InputTrace: validates the raw-input wheel bridge added to
 // WindowManager::processPlatformEvent. Windows precision trackpad /

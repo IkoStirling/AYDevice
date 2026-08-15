@@ -1,6 +1,6 @@
 #pragma once
 
-#include "AYInputTypes.h"   // KeyCode for TopLevelWindowCallbacks::onKey
+#include "AYDevice/InputTypes.h"   // KeyCode for TopLevelWindowCallbacks::onKey
 #include <cstdint>
 #include <functional>
 #include <string>

@@ -1,7 +1,7 @@
 #include "AYTest.h"
-#include "AYDeviceSubSystem.h"
+#include "AYDevice/DeviceSubSystem.h"
 
-#include <AYSubSystemRegistry.h>
+#include <AYGameLoop/SubSystemRegistry.h>
 
 using namespace ayt::device;
 

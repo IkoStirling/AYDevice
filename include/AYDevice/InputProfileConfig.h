@@ -1,5 +1,5 @@
 #pragma once
-// AYInputProfileConfig.h - Bridge InputProfile <-> AYConfig ([Input.*] keys)
+// AYDevice/InputProfileConfig.h - Bridge InputProfile <-> AYConfig ([Input.*] keys)
 
 #include <string>
 

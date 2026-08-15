@@ -1,4 +1,4 @@
-#include "AYMouseDevice.h"
+#include "AYDevice/MouseDevice.h"
 
 namespace ayt::device {
 

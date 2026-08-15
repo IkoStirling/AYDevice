@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYTouchDevice.h"
-#include "AYTextInput.h"
+#include "AYDevice/TouchDevice.h"
+#include "AYDevice/TextInput.h"
 
 using namespace ayt::device;
 

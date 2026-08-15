@@ -1,13 +1,13 @@
 #pragma once
 
-#include "AYWindowManager.h"
-#include "AYWindowTypes.h"
-#include "AYKeyboardDevice.h"
-#include "AYMouseDevice.h"
-#include "AYGamepadDevice.h"
-#include "AYTouchDevice.h"
-#include "AYTextInput.h"
-#include "AYInputMapping.h"
+#include "AYDevice/WindowManager.h"
+#include "AYDevice/WindowTypes.h"
+#include "AYDevice/KeyboardDevice.h"
+#include "AYDevice/MouseDevice.h"
+#include "AYDevice/GamepadDevice.h"
+#include "AYDevice/TouchDevice.h"
+#include "AYDevice/TextInput.h"
+#include "AYDevice/InputMapping.h"
 
 #include <array>
 

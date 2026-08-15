@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYGamepadDevice.h"
-#include "AYInputMapping.h"
+#include "AYDevice/GamepadDevice.h"
+#include "AYDevice/InputMapping.h"
 
 using namespace ayt::device;
 

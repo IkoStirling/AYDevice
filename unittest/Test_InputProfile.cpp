@@ -1,10 +1,10 @@
 #include "AYTest.h"
-#include "AYInputNames.h"
-#include "AYInputProfile.h"
-#include "AYInputMapping.h"
-#include "AYKeyboardDevice.h"
-#include "AYMouseDevice.h"
-#include "AYGamepadDevice.h"
+#include "AYDevice/InputNames.h"
+#include "AYDevice/InputProfile.h"
+#include "AYDevice/InputMapping.h"
+#include "AYDevice/KeyboardDevice.h"
+#include "AYDevice/MouseDevice.h"
+#include "AYDevice/GamepadDevice.h"
 
 using namespace ayt::device;
 

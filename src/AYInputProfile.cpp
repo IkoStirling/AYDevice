@@ -1,7 +1,7 @@
-#include "AYInputProfile.h"
+#include "AYDevice/InputProfile.h"
 
-#include "AYInputNames.h"
-#include "AYInputMapping.h"
+#include "AYDevice/InputNames.h"
+#include "AYDevice/InputMapping.h"
 
 #include <charconv>
 

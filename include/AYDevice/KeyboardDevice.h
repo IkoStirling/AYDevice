@@ -1,8 +1,8 @@
 #pragma once
-// AYKeyboardDevice.h - Keyboard state with per-frame edge detection
+// AYDevice/KeyboardDevice.h - Keyboard state with per-frame edge detection
 
-#include "AYInputDevice.h"
-#include "AYInputTypes.h"
+#include "AYDevice/InputDevice.h"
+#include "AYDevice/InputTypes.h"
 
 #include <array>
 

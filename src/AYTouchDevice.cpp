@@ -1,4 +1,4 @@
-#include "AYTouchDevice.h"
+#include "AYDevice/TouchDevice.h"
 
 #include <algorithm>
 

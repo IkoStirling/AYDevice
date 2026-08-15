@@ -1,7 +1,7 @@
 #pragma once
-// AYInputNames.h - Stable string names for input enums (profile serialization)
+// AYDevice/InputNames.h - Stable string names for input enums (profile serialization)
 
-#include "AYInputTypes.h"
+#include "AYDevice/InputTypes.h"
 
 #include <string>
 #include <string_view>

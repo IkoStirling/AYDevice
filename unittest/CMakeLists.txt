@@ -19,7 +19,7 @@ add_executable(${TEST_NAME}
 
 target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
-    # INT-03: AYAppEventHost.h (EventBusHostScope) lives here.
+    # INT-03: AYApplication/AppEventHost.h (EventBusHostScope) lives here.
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 

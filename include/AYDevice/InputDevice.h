@@ -1,5 +1,5 @@
 #pragma once
-// AYInputDevice.h - Base interface for pollable input devices
+// AYDevice/InputDevice.h - Base interface for pollable input devices
 
 namespace ayt::device {
 

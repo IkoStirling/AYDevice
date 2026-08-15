@@ -1,5 +1,5 @@
 #pragma once
-// AYDeviceInputProvider.h - INT-02 (2026-07-15)
+// AYDevice/DeviceInputProvider.h - INT-02 (2026-07-15)
 //
 // Adapter: Logia `LogiaRuntimeBridge::InputProvider` -> AYDevice
 // `InputMapping`. Held by ScriptSubSystem via setInputProvider();
@@ -21,7 +21,7 @@
 // because the core stays free of the AYScript dependency by design —
 // see AYDevice/CMakeLists.txt § AYDeviceSubSystem comment block.
 
-#include <AYScriptRuntimeBridge.h>
+#include <AYScript/ScriptRuntimeBridge.h>
 
 namespace ayt::device {
 

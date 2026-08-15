@@ -1,8 +1,8 @@
-#include "AYInputMapping.h"
+#include "AYDevice/InputMapping.h"
 
-#include "AYKeyboardDevice.h"
-#include "AYMouseDevice.h"
-#include "AYGamepadDevice.h"
+#include "AYDevice/KeyboardDevice.h"
+#include "AYDevice/MouseDevice.h"
+#include "AYDevice/GamepadDevice.h"
 
 namespace ayt::device {
 

@@ -16,7 +16,7 @@
 // =============================================================================
 
 #include "AYTest.h"
-#include "AYWindowManager.h"
+#include "AYDevice/WindowManager.h"
 
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN

@@ -1,5 +1,5 @@
 #include "AYTest.h"
-#include "AYDeviceManager.h"
+#include "AYDevice/DeviceManager.h"
 
 using namespace ayt::device;
 

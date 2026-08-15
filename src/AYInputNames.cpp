@@ -1,4 +1,4 @@
-#include "AYInputNames.h"
+#include "AYDevice/InputNames.h"
 
 #include <array>
 

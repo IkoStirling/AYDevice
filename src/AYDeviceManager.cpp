@@ -1,4 +1,4 @@
-#include "AYDeviceManager.h"
+#include "AYDevice/DeviceManager.h"
 
 #if defined(AY_DEVICE_USE_SDL2)
 #  include <SDL.h>

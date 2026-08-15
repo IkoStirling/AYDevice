@@ -73,7 +73,7 @@ a GameLoop `ISubSystem`:
   `REGISTER_SUBSYSTEM` auto-init macro.
 
 ```cpp
-#include "AYDeviceSubSystem.h"
+#include "AYDevice/DeviceSubSystem.h"
 using namespace ayt::device;
 
 DeviceConfig config{};

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "AYWindowTypes.h"
-#include "AYInputTypes.h"
+#include "AYDevice/WindowTypes.h"
+#include "AYDevice/InputTypes.h"
 
 #include <cstdint>
 #include <memory>

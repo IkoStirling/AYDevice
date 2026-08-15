@@ -1,7 +1,7 @@
 #pragma once
-// AYInputMapping.h - Action / Axis abstraction over physical input
+// AYDevice/InputMapping.h - Action / Axis abstraction over physical input
 
-#include "AYInputTypes.h"
+#include "AYDevice/InputTypes.h"
 
 #include <span>
 #include <string>

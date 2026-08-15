@@ -1,7 +1,7 @@
 #pragma once
-// AYDeviceSubSystem.h - GameLoop subsystem wrapping DeviceManager
+// AYDevice/DeviceSubSystem.h - GameLoop subsystem wrapping DeviceManager
 
-#include "AYDeviceManager.h"
+#include "AYDevice/DeviceManager.h"
 
 #include <AYGameLoop.h>
 
@@ -10,7 +10,7 @@
 // system listeners (Phase 4 §a8c8be9 lesson — the device bridge is a pure
 // producer today, but the scope is here so future Device-side listeners
 // plug in via _events.subscribe<T>()).
-#include <AYAppEventHost.h>
+#include <AYApplication/AppEventHost.h>
 
 #include <cstdint>
 #include <functional>

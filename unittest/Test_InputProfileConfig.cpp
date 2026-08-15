@@ -1,6 +1,6 @@
 #include "AYTest.h"
-#include "AYInputProfile.h"
-#include "AYInputProfileConfig.h"
+#include "AYDevice/InputProfile.h"
+#include "AYDevice/InputProfileConfig.h"
 
 #include <AYConfig.h>
 
