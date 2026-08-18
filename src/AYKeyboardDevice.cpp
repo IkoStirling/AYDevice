@@ -28,6 +28,11 @@ void KeyboardDevice::onKeyUp(KeyCode key)
     _current[index(key)] = false;
 }
 
+void KeyboardDevice::releaseAll()
+{
+    _current.fill(false);
+}
+
 void KeyboardDevice::reset()
 {
     _current.fill(false);

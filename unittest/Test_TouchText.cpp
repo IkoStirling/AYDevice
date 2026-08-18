@@ -72,6 +72,18 @@ TEST_CASE(test_touch_index_bounds_safe) {
     CHECK(!touch.isTouched());
 }
 
+TEST_CASE(test_touch_cancel_all_marks_active_contacts) {
+    TouchDevice touch;
+    touch.newFrame();
+    touch.onTouch(9, 10.0f, 20.0f, TouchPhase::Began);
+    touch.cancelAll();
+    CHECK(touch.getTouchById(9) != nullptr);
+    CHECK(touch.getTouchById(9)->phase == TouchPhase::Cancelled);
+
+    touch.newFrame();
+    CHECK(touch.getTouchById(9) == nullptr);
+}
+
 TEST_CASE(test_textinput_disabled_ignores) {
     TextInput text;
     // Disabled by default: events are dropped.

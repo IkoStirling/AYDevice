@@ -78,6 +78,14 @@ void TouchDevice::onTouch(int64_t id, float x, float y, TouchPhase phase)
     point->phase = phase;
 }
 
+void TouchDevice::cancelAll()
+{
+    for (TouchPoint& point : _points) {
+        point.delta = Vector2{};
+        point.phase = TouchPhase::Cancelled;
+    }
+}
+
 void TouchDevice::reset()
 {
     _points.clear();

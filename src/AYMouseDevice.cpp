@@ -30,6 +30,12 @@ void MouseDevice::onMove(float x, float y)
     _hasLastPosition = true;
 }
 
+void MouseDevice::onRelativeMove(float deltaX, float deltaY)
+{
+    _delta.x += deltaX;
+    _delta.y += deltaY;
+}
+
 void MouseDevice::onButtonDown(MouseButton button)
 {
     _current[index(button)] = true;
@@ -43,6 +49,14 @@ void MouseDevice::onButtonUp(MouseButton button)
 void MouseDevice::onWheel(float delta)
 {
     _wheelDelta += delta;
+}
+
+void MouseDevice::releaseAllButtons()
+{
+    _current.fill(false);
+    _delta = Vector2{};
+    _wheelDelta = 0.0f;
+    _hasLastPosition = false;
 }
 
 void MouseDevice::reset()

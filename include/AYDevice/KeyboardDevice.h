@@ -26,6 +26,9 @@ public:
     // ===== Event feed (called by the platform layer) =====
     void onKeyDown(KeyCode key);
     void onKeyUp(KeyCode key);
+    // Release held keys without erasing the previous-frame snapshot, so
+    // focus loss produces one frame of just-released edges.
+    void releaseAll();
     void reset();
 
     // ===== Queries =====

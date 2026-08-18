@@ -42,13 +42,23 @@ public:
     void setKeyCallback(KeyCallback callback);
     void setMouseButtonCallback(MouseButtonCallback callback);
     void setMouseMoveCallback(MouseMoveCallback callback);
+    void setMouseDeltaCallback(MouseDeltaCallback callback);
     void setMouseWheelCallback(MouseWheelCallback callback);
+
+    // Relative mode uses raw mouse deltas and owns cursor capture/visibility.
+    // A requested mode is suspended while unfocused and restored on focus.
+    bool setRelativeMouseMode(bool enabled);
+    bool isRelativeMouseMode() const;
 
     // Touch + text/IME callbacks. Touch requires enableTouch (registers the
     // window for WM_TOUCH); text is always available once wired.
     void setTouchCallback(TouchCallback callback);
     void setCharCallback(CharCallback callback);
     void setCompositionCallback(CompositionCallback callback);
+
+    // DeviceManager uses this independent callback to clear transient input
+    // when focus is lost without occupying the public focus callback slot.
+    void setInputResetCallback(std::function<void()> callback);
 
     // Enable WM_TOUCH delivery for the main window (Win32 RegisterTouchWindow).
     void setTouchEnabled(bool enabled);
@@ -93,6 +103,9 @@ public:
                                        bool& handled) const;
 
 private:
+    void updateRelativeMouseState();
+    void handleMouseButton(MouseButton button, bool pressed);
+
     struct Impl;
     std::unique_ptr<Impl> _impl;
 };

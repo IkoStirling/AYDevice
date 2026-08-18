@@ -31,6 +31,9 @@ public:
     // Began adds it, Moved/Stationary updates it (delta accumulated), and
     // Ended/Cancelled marks it for retirement at the next newFrame().
     void onTouch(int64_t id, float x, float y, TouchPhase phase);
+    // Mark every active contact cancelled. They remain queryable for this
+    // frame and retire on the next newFrame().
+    void cancelAll();
     void reset();
 
     // ===== Queries =====

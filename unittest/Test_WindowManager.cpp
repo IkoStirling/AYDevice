@@ -97,4 +97,51 @@ TEST_CASE(test_device_manager_initialize_poll) {
     CHECK(!devices.window().isWindowValid());
 }
 
+TEST_CASE(test_device_manager_focus_loss_releases_transient_input) {
+    DeviceManager devices;
+    DeviceConfig config{};
+    config.window.hidden = true;
+    config.enableTouch = true;
+    CHECK(devices.initialize(config));
+
+    devices.pollEvents();
+    devices.keyboard()->onKeyDown(KeyCode::W);
+    devices.mouse()->onButtonDown(MouseButton::Left);
+    devices.touch()->onTouch(7, 12.0f, 18.0f, TouchPhase::Began);
+    // The controls were held across a frame boundary before focus was lost.
+    devices.keyboard()->newFrame();
+    devices.mouse()->newFrame();
+    devices.touch()->newFrame();
+    devices.textInput().setEnabled(true);
+    devices.textInput().onComposition("abc", 3, 1);
+
+    devices.window().notifyFocused(false);
+
+    CHECK(!devices.keyboard()->isKeyPressed(KeyCode::W));
+    CHECK(devices.keyboard()->isKeyJustReleased(KeyCode::W));
+    CHECK(!devices.mouse()->isButtonPressed(MouseButton::Left));
+    CHECK(devices.mouse()->isButtonJustReleased(MouseButton::Left));
+    CHECK(devices.touch()->getTouchById(7) != nullptr);
+    CHECK(devices.touch()->getTouchById(7)->phase == TouchPhase::Cancelled);
+    CHECK(!devices.textInput().isComposing());
+
+    devices.shutdown();
+}
+
+#if defined(_WIN32)
+TEST_CASE(test_relative_mouse_request_survives_unfocused_window) {
+    WindowManager windows;
+    WindowCreateInfo info{};
+    info.hidden = true;
+    CHECK(windows.createWindow(info));
+
+    CHECK(windows.setRelativeMouseMode(true));
+    CHECK(windows.isRelativeMouseMode());
+    CHECK(windows.setRelativeMouseMode(false));
+    CHECK(!windows.isRelativeMouseMode());
+
+    windows.destroyWindow();
+}
+#endif
+
 TEST_SUITE_END

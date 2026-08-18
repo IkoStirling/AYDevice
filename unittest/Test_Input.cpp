@@ -37,6 +37,17 @@ TEST_CASE(test_keyboard_unknown_key_safe) {
     CHECK(!kb.isKeyPressed(KeyCode::A));
 }
 
+TEST_CASE(test_keyboard_release_all_preserves_release_edges) {
+    KeyboardDevice kb;
+    kb.newFrame();
+    kb.onKeyDown(KeyCode::W);
+
+    kb.newFrame();
+    kb.releaseAll();
+    CHECK(!kb.isKeyPressed(KeyCode::W));
+    CHECK(kb.isKeyJustReleased(KeyCode::W));
+}
+
 TEST_CASE(test_mouse_move_delta_and_wheel) {
     MouseDevice mouse;
 
@@ -75,6 +86,26 @@ TEST_CASE(test_mouse_button_edges) {
 
     mouse.newFrame();
     mouse.onButtonUp(MouseButton::Left);
+    CHECK(!mouse.isButtonPressed(MouseButton::Left));
+    CHECK(mouse.isButtonJustReleased(MouseButton::Left));
+}
+
+TEST_CASE(test_mouse_relative_delta_accumulates) {
+    MouseDevice mouse;
+    mouse.newFrame();
+    mouse.onRelativeMove(3.0f, -2.0f);
+    mouse.onRelativeMove(0.5f, 4.0f);
+    CHECK(mouse.getDelta().x == 3.5f);
+    CHECK(mouse.getDelta().y == 2.0f);
+}
+
+TEST_CASE(test_mouse_release_all_preserves_release_edges) {
+    MouseDevice mouse;
+    mouse.newFrame();
+    mouse.onButtonDown(MouseButton::Left);
+
+    mouse.newFrame();
+    mouse.releaseAllButtons();
     CHECK(!mouse.isButtonPressed(MouseButton::Left));
     CHECK(mouse.isButtonJustReleased(MouseButton::Left));
 }

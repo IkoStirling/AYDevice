@@ -138,6 +138,7 @@ struct TouchPoint {
 using KeyCallback = std::function<void(KeyCode key, bool pressed)>;
 using MouseButtonCallback = std::function<void(MouseButton button, bool pressed)>;
 using MouseMoveCallback = std::function<void(float x, float y)>;
+using MouseDeltaCallback = std::function<void(float deltaX, float deltaY)>;
 using MouseWheelCallback = std::function<void(float delta)>;
 
 // Touch: one call per active contact per WM_TOUCH message.

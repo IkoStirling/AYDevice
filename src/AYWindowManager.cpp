@@ -115,7 +115,9 @@ struct WindowManager::Impl {
     KeyCallback onKey;
     MouseButtonCallback onMouseButton;
     MouseMoveCallback onMouseMove;
+    MouseDeltaCallback onMouseDelta;
     MouseWheelCallback onMouseWheel;
+    std::function<void()> onInputReset;
 
     TouchCallback onTouch;
     CharCallback onChar;
@@ -126,6 +128,11 @@ struct WindowManager::Impl {
     // WM_INPUT (raw input) instead of WM_MOUSEWHEEL. Registered once per
     // window in createWindow; unregistered in destroyWindow.
     bool rawInputRegistered = false;
+    bool focused = false;
+    bool relativeMouseRequested = false;
+    bool relativeMouseActive = false;
+    int cursorHideAdjustments = 0;
+    unsigned pressedMouseButtons = 0;
 
     // PR-InputTrace: per-message-class trigger counters. Diagnostic only;
     // logged once at first trigger and every 60 thereafter to avoid
@@ -721,6 +728,11 @@ void WindowManager::destroyWindow()
     destroyAllChildWindows();
     destroyAllTopLevelWindows();
 
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+    _impl->relativeMouseRequested = false;
+    updateRelativeMouseState();
+#endif
+
 #if defined(AY_DEVICE_USE_SDL2)
     if (_impl->sdlWindow != nullptr) {
         SDL_DestroyWindow(_impl->sdlWindow);
@@ -891,7 +903,23 @@ void WindowManager::notifyResized(int width, int height)
 
 void WindowManager::notifyFocused(bool focused)
 {
-    if (_impl && _impl->onFocus) {
+    if (!_impl) {
+        return;
+    }
+#if defined(_WIN32)
+    _impl->focused = focused;
+    if (!focused) {
+        _impl->pressedMouseButtons = 0;
+        if (_impl->hwnd != nullptr && ::GetCapture() == _impl->hwnd) {
+            ::ReleaseCapture();
+        }
+    }
+    updateRelativeMouseState();
+#endif
+    if (!focused && _impl->onInputReset) {
+        _impl->onInputReset();
+    }
+    if (_impl->onFocus) {
         _impl->onFocus(focused);
     }
 }
@@ -981,6 +1009,17 @@ void WindowManager::setMouseMoveCallback(MouseMoveCallback callback)
 #endif
 }
 
+void WindowManager::setMouseDeltaCallback(MouseDeltaCallback callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onMouseDelta = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
 void WindowManager::setMouseWheelCallback(MouseWheelCallback callback)
 {
 #if defined(_WIN32)
@@ -1022,6 +1061,120 @@ void WindowManager::setCompositionCallback(CompositionCallback callback)
     }
 #else
     (void)callback;
+#endif
+}
+
+void WindowManager::setInputResetCallback(std::function<void()> callback)
+{
+#if defined(_WIN32)
+    if (_impl) {
+        _impl->onInputReset = std::move(callback);
+    }
+#else
+    (void)callback;
+#endif
+}
+
+bool WindowManager::setRelativeMouseMode(bool enabled)
+{
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+    if (!_impl || !_impl->valid || _impl->hwnd == nullptr) {
+        return false;
+    }
+    _impl->relativeMouseRequested = enabled;
+    updateRelativeMouseState();
+    return !enabled || !_impl->focused || _impl->relativeMouseActive;
+#else
+    (void)enabled;
+    return false;
+#endif
+}
+
+bool WindowManager::isRelativeMouseMode() const
+{
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+    return _impl && _impl->relativeMouseRequested;
+#else
+    return false;
+#endif
+}
+
+void WindowManager::updateRelativeMouseState()
+{
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+    if (!_impl) {
+        return;
+    }
+
+    const bool shouldBeActive = _impl->relativeMouseRequested
+                             && _impl->focused
+                             && _impl->valid
+                             && _impl->hwnd != nullptr;
+    if (shouldBeActive == _impl->relativeMouseActive) {
+        return;
+    }
+
+    if (shouldBeActive) {
+        RECT clip{};
+        if (!::GetClientRect(_impl->hwnd, &clip)) {
+            return;
+        }
+        POINT topLeft{clip.left, clip.top};
+        POINT bottomRight{clip.right, clip.bottom};
+        if (!::ClientToScreen(_impl->hwnd, &topLeft)
+            || !::ClientToScreen(_impl->hwnd, &bottomRight)) {
+            return;
+        }
+        clip = RECT{topLeft.x, topLeft.y, bottomRight.x, bottomRight.y};
+        if (!::ClipCursor(&clip)) {
+            return;
+        }
+        ::SetCapture(_impl->hwnd);
+        _impl->cursorHideAdjustments = 0;
+        do {
+            ++_impl->cursorHideAdjustments;
+        } while (::ShowCursor(FALSE) >= 0 && _impl->cursorHideAdjustments < 32);
+        _impl->relativeMouseActive = true;
+        return;
+    }
+
+    ::ClipCursor(nullptr);
+    if (_impl->hwnd != nullptr && ::GetCapture() == _impl->hwnd) {
+        ::ReleaseCapture();
+    }
+    while (_impl->cursorHideAdjustments > 0) {
+        ::ShowCursor(TRUE);
+        --_impl->cursorHideAdjustments;
+    }
+    _impl->relativeMouseActive = false;
+#endif
+}
+
+void WindowManager::handleMouseButton(MouseButton button, bool pressed)
+{
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+    if (!_impl) {
+        return;
+    }
+    const unsigned bit = 1u << static_cast<unsigned>(button);
+    if (pressed) {
+        _impl->pressedMouseButtons |= bit;
+        if (_impl->hwnd != nullptr) {
+            ::SetCapture(_impl->hwnd);
+        }
+    } else {
+        _impl->pressedMouseButtons &= ~bit;
+        if (_impl->pressedMouseButtons == 0 && !_impl->relativeMouseActive
+            && _impl->hwnd != nullptr && ::GetCapture() == _impl->hwnd) {
+            ::ReleaseCapture();
+        }
+    }
+    if (_impl->onMouseButton) {
+        _impl->onMouseButton(button, pressed);
+    }
+#else
+    (void)button;
+    (void)pressed;
 #endif
 }
 
@@ -1388,20 +1541,26 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
         if (_impl->onKey) {
             const bool repeat = (lParam & (1 << 30)) != 0;  // bit 30 = previous key state
             if (!repeat) {
-                _impl->onKey(translateVirtualKey(wParam, lParam), true);
+                const KeyCode key = translateVirtualKey(wParam, lParam);
+                if (key != KeyCode::Unknown) {
+                    _impl->onKey(key, true);
+                }
             }
         }
         break;
     case WM_KEYUP:
     case WM_SYSKEYUP:
         if (_impl->onKey) {
-            _impl->onKey(translateVirtualKey(wParam, lParam), false);
+            const KeyCode key = translateVirtualKey(wParam, lParam);
+            if (key != KeyCode::Unknown) {
+                _impl->onKey(key, false);
+            }
         }
         break;
 
     // ===== Mouse move =====
     case WM_MOUSEMOVE:
-        if (_impl->onMouseMove) {
+        if (_impl->onMouseMove && !_impl->relativeMouseActive) {
             const int x = static_cast<short>(LOWORD(lParam));
             const int y = static_cast<short>(HIWORD(lParam));
             _impl->onMouseMove(static_cast<float>(x), static_cast<float>(y));
@@ -1410,34 +1569,30 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
 
     // ===== Mouse buttons =====
     case WM_LBUTTONDOWN:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Left, true); }
+        handleMouseButton(MouseButton::Left, true);
         break;
     case WM_LBUTTONUP:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Left, false); }
+        handleMouseButton(MouseButton::Left, false);
         break;
     case WM_RBUTTONDOWN:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Right, true); }
+        handleMouseButton(MouseButton::Right, true);
         break;
     case WM_RBUTTONUP:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Right, false); }
+        handleMouseButton(MouseButton::Right, false);
         break;
     case WM_MBUTTONDOWN:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Middle, true); }
+        handleMouseButton(MouseButton::Middle, true);
         break;
     case WM_MBUTTONUP:
-        if (_impl->onMouseButton) { _impl->onMouseButton(MouseButton::Middle, false); }
+        handleMouseButton(MouseButton::Middle, false);
         break;
     case WM_XBUTTONDOWN:
-        if (_impl->onMouseButton) {
-            const MouseButton btn = (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
-            _impl->onMouseButton(btn, true);
-        }
+        handleMouseButton((HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2,
+                          true);
         break;
     case WM_XBUTTONUP:
-        if (_impl->onMouseButton) {
-            const MouseButton btn = (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
-            _impl->onMouseButton(btn, false);
-        }
+        handleMouseButton((HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2,
+                          false);
         break;
 
     // ===== Mouse wheel (normalized to notches) =====
@@ -1532,6 +1687,11 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                               sizeof(RAWINPUTHEADER)) != dwSize) break;
         auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
         if (raw->header.dwType != RIM_TYPEMOUSE) break;
+        if (_impl->relativeMouseActive && _impl->onMouseDelta
+            && (raw->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+            _impl->onMouseDelta(static_cast<float>(raw->data.mouse.lLastX),
+                                static_cast<float>(raw->data.mouse.lLastY));
+        }
         if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)) {
             if (ayDeviceTraceInputEnabled()) {
                 ++_impl->rawInputTriggerCount;

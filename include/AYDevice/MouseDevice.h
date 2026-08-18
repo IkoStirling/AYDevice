@@ -25,9 +25,13 @@ public:
 
     // ===== Event feed (called by the platform layer) =====
     void onMove(float x, float y);
+    void onRelativeMove(float deltaX, float deltaY);
     void onButtonDown(MouseButton button);
     void onButtonUp(MouseButton button);
     void onWheel(float delta);
+    // Release held buttons and discard motion continuity while retaining the
+    // previous-frame snapshot for just-released edges.
+    void releaseAllButtons();
     void reset();
 
     // ===== Queries =====

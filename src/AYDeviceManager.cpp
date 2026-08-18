@@ -72,6 +72,9 @@ void DeviceManager::wireInputCallbacks()
         _windowManager.setMouseMoveCallback([this](float x, float y) {
             _mouse.onMove(x, y);
         });
+        _windowManager.setMouseDeltaCallback([this](float deltaX, float deltaY) {
+            _mouse.onRelativeMove(deltaX, deltaY);
+        });
         _windowManager.setMouseWheelCallback([this](float delta) {
             _mouse.onWheel(delta);
         });
@@ -92,6 +95,21 @@ void DeviceManager::wireInputCallbacks()
             _textInput.endComposition();
         } else {
             _textInput.onComposition(utf8, byteCount, cursor);
+        }
+    });
+
+    _windowManager.setInputResetCallback([this]() {
+        if (_keyboardEnabled) {
+            _keyboard.releaseAll();
+        }
+        if (_mouseEnabled) {
+            _mouse.releaseAllButtons();
+        }
+        if (_touchEnabled) {
+            _touch.cancelAll();
+        }
+        if (_textInput.isComposing()) {
+            _textInput.endComposition();
         }
     });
 }
