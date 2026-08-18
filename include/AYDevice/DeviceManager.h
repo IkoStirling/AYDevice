@@ -73,6 +73,10 @@ public:
 
 private:
     void wireInputCallbacks();
+    void initializePlatformGamepads();
+    void shutdownPlatformGamepads();
+    void openPlatformGamepad(int deviceIndex);
+    void closePlatformGamepad(int32_t instanceId);
 
     bool _initialized = false;
     bool _keyboardEnabled = false;
@@ -85,6 +89,8 @@ private:
     MouseDevice    _mouse;
     std::array<GamepadDevice, kMaxGamepads> _gamepads{
         GamepadDevice{0}, GamepadDevice{1}, GamepadDevice{2}, GamepadDevice{3}};
+    std::array<void*, kMaxGamepads> _platformGamepads{};
+    std::array<int32_t, kMaxGamepads> _platformGamepadIds{-1, -1, -1, -1};
     TouchDevice    _touch;
     TextInput      _textInput;
     InputMapping   _mapping;

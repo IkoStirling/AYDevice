@@ -9,8 +9,9 @@
 
 namespace ayt::device {
 
-// A single gamepad slot. On Windows the state is read from XInput in poll();
-// the event-feed setters exist for tests and for non-XInput backends.
+// A single gamepad slot. State is sampled in poll() from XInput or the SDL2
+// controller assigned by DeviceManager; event-feed setters remain available
+// for tests and custom backends.
 //
 // Frame flow (driven by DeviceManager):
 //   1. newFrame() -> snapshot buttons as "previous"
@@ -27,7 +28,7 @@ public:
 
     int slot() const { return _slot; }
 
-    // Refresh state from the platform (XInput on Windows). No-op elsewhere.
+    // Refresh state from the selected platform backend.
     void poll();
 
     // ===== Analog queries =====
@@ -54,11 +55,15 @@ public:
     void reset();
 
 private:
+    friend class DeviceManager;
+
+    void attachPlatformController(void* controller);
     static int buttonIndex(GamepadButton button);
     static int axisIndex(GamepadAxis axis);
 
     int  _slot = 0;
     bool _connected = false;
+    void* _platformController = nullptr;
 
     std::array<bool, kGamepadButtonCount> _current{};
     std::array<bool, kGamepadButtonCount> _previous{};

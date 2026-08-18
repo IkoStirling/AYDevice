@@ -4,12 +4,23 @@ namespace ayt::device {
 
 void TextInput::setEnabled(bool enabled)
 {
+    if (_enabled == enabled) {
+        return;
+    }
     _enabled = enabled;
     if (!enabled) {
         _composing = false;
         _composition.clear();
         _compositionCursor = 0;
     }
+    if (_onEnabledChanged) {
+        _onEnabledChanged(enabled);
+    }
+}
+
+void TextInput::setEnabledChangedCallback(std::function<void(bool)> callback)
+{
+    _onEnabledChanged = std::move(callback);
 }
 
 void TextInput::newFrame()

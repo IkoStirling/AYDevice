@@ -55,6 +55,7 @@ public:
     void setTouchCallback(TouchCallback callback);
     void setCharCallback(CharCallback callback);
     void setCompositionCallback(CompositionCallback callback);
+    void setTextInputEnabled(bool enabled);
 
     // DeviceManager uses this independent callback to clear transient input
     // when focus is lost without occupying the public focus callback slot.

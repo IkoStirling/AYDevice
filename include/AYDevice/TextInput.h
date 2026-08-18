@@ -28,6 +28,8 @@ public:
     // ===== Enable / focus =====
     void setEnabled(bool enabled);
     bool isEnabled() const { return _enabled; }
+    // Platform bridge hook used by DeviceManager (SDL_Start/StopTextInput).
+    void setEnabledChangedCallback(std::function<void(bool)> callback);
 
     // ===== IInputDevice-style frame boundary =====
     void newFrame();
@@ -61,6 +63,7 @@ private:
     std::string _committed;         // this frame's committed text
     std::string _composition;       // current IME candidate
     int         _compositionCursor = 0;
+    std::function<void(bool)> _onEnabledChanged;
 };
 
 } // namespace ayt::device

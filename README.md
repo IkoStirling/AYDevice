@@ -119,6 +119,12 @@ Default backend is **Win32** on Windows. Optional SDL2 via CMake:
 -DAY_DEVICE_USE_SDL2=ON
 ```
 
+Both backends feed the same keyboard, mouse, touch, UTF-8 text/IME and
+InputMapping state. Win32 gamepads use XInput; SDL2 gamepads use
+SDL_GameController with hot-plug slot assignment and rumble. Relative mouse
+mode is available through `WindowManager::setRelativeMouseMode()` and is
+automatically suspended on focus loss.
+
 ## Usage
 
 ```cpp
@@ -132,6 +138,7 @@ config.window.height = 720;
 
 devices.initialize(config);
 // devices.window().getWindowHandle() -> pass to bgfx / renderer bootstrap
+// devices.window().setRelativeMouseMode(true); -> FPS/raw mouse look
 
 // Input (Phase-2)
 ayt::device::KeyCode jump[] = { ayt::device::KeyCode::Space };
@@ -157,7 +164,9 @@ devices.shutdown();
 
 ## Tests
 
-Build and run `Test_AYDevice` after configuring the project.
+Build and run `AYDevice_Test` after configuring the project. Backend work can
+use the smaller `AYDevice_Core_Test`; SDL2 builds additionally provide
+`AYDevice_SDL_Test` for native event translation.
 
 ## See also
 

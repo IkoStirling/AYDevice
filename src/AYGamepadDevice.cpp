@@ -3,6 +3,10 @@
 #include <algorithm>
 #include <cmath>
 
+#if defined(AY_DEVICE_USE_SDL2)
+#  include <SDL.h>
+#endif
+
 #if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -66,6 +70,34 @@ WORD xinputButtonMask(GamepadButton button)
     case GamepadButton::DpadRight:   return XINPUT_GAMEPAD_DPAD_RIGHT;
     default:                         return 0;
     }
+}
+#elif defined(AY_DEVICE_USE_SDL2)
+SDL_GameControllerButton sdlButton(GamepadButton button)
+{
+    switch (button) {
+    case GamepadButton::A:           return SDL_CONTROLLER_BUTTON_A;
+    case GamepadButton::B:           return SDL_CONTROLLER_BUTTON_B;
+    case GamepadButton::X:           return SDL_CONTROLLER_BUTTON_X;
+    case GamepadButton::Y:           return SDL_CONTROLLER_BUTTON_Y;
+    case GamepadButton::LeftBumper:  return SDL_CONTROLLER_BUTTON_LEFTSHOULDER;
+    case GamepadButton::RightBumper: return SDL_CONTROLLER_BUTTON_RIGHTSHOULDER;
+    case GamepadButton::Back:        return SDL_CONTROLLER_BUTTON_BACK;
+    case GamepadButton::Start:       return SDL_CONTROLLER_BUTTON_START;
+    case GamepadButton::Guide:       return SDL_CONTROLLER_BUTTON_GUIDE;
+    case GamepadButton::LeftStick:   return SDL_CONTROLLER_BUTTON_LEFTSTICK;
+    case GamepadButton::RightStick:  return SDL_CONTROLLER_BUTTON_RIGHTSTICK;
+    case GamepadButton::DpadUp:      return SDL_CONTROLLER_BUTTON_DPAD_UP;
+    case GamepadButton::DpadDown:    return SDL_CONTROLLER_BUTTON_DPAD_DOWN;
+    case GamepadButton::DpadLeft:    return SDL_CONTROLLER_BUTTON_DPAD_LEFT;
+    case GamepadButton::DpadRight:   return SDL_CONTROLLER_BUTTON_DPAD_RIGHT;
+    default:                         return SDL_CONTROLLER_BUTTON_INVALID;
+    }
+}
+
+float normalizeSdlAxis(Sint16 value)
+{
+    return value < 0 ? static_cast<float>(value) / 32768.0f
+                     : static_cast<float>(value) / 32767.0f;
 }
 #endif
 
@@ -134,6 +166,37 @@ void GamepadDevice::poll()
         applyDeadzone(static_cast<float>(pad.bLeftTrigger) / kTriggerMax, kTriggerThreshold);
     _axes[axisIndex(GamepadAxis::RightTrigger)] =
         applyDeadzone(static_cast<float>(pad.bRightTrigger) / kTriggerMax, kTriggerThreshold);
+#elif defined(AY_DEVICE_USE_SDL2)
+    auto* controller = static_cast<SDL_GameController*>(_platformController);
+    if (controller == nullptr || SDL_GameControllerGetAttached(controller) == SDL_FALSE) {
+        setConnected(false);
+        return;
+    }
+
+    _connected = true;
+    for (int i = 0; i < kGamepadButtonCount; ++i) {
+        const auto button = sdlButton(static_cast<GamepadButton>(i));
+        _current[i] = button != SDL_CONTROLLER_BUTTON_INVALID
+                   && SDL_GameControllerGetButton(controller, button) != 0;
+    }
+
+    const auto axis = [controller](SDL_GameControllerAxis which) {
+        return normalizeSdlAxis(SDL_GameControllerGetAxis(controller, which));
+    };
+    _axes[axisIndex(GamepadAxis::LeftX)] =
+        applyDeadzone(axis(SDL_CONTROLLER_AXIS_LEFTX), kLeftStickDeadzone);
+    _axes[axisIndex(GamepadAxis::LeftY)] =
+        applyDeadzone(-axis(SDL_CONTROLLER_AXIS_LEFTY), kLeftStickDeadzone);
+    _axes[axisIndex(GamepadAxis::RightX)] =
+        applyDeadzone(axis(SDL_CONTROLLER_AXIS_RIGHTX), kRightStickDeadzone);
+    _axes[axisIndex(GamepadAxis::RightY)] =
+        applyDeadzone(-axis(SDL_CONTROLLER_AXIS_RIGHTY), kRightStickDeadzone);
+    _axes[axisIndex(GamepadAxis::LeftTrigger)] =
+        applyDeadzone(std::max(0.0f, axis(SDL_CONTROLLER_AXIS_TRIGGERLEFT)),
+                      kTriggerThreshold);
+    _axes[axisIndex(GamepadAxis::RightTrigger)] =
+        applyDeadzone(std::max(0.0f, axis(SDL_CONTROLLER_AXIS_TRIGGERRIGHT)),
+                      kTriggerThreshold);
 #endif
 }
 
@@ -166,10 +229,25 @@ void GamepadDevice::setVibration(float leftMotor, float rightMotor)
     vibration.wRightMotorSpeed =
         static_cast<WORD>(std::clamp(rightMotor, 0.0f, 1.0f) * 65535.0f);
     XInputSetState(static_cast<DWORD>(_slot), &vibration);
+#elif defined(AY_DEVICE_USE_SDL2)
+    auto* controller = static_cast<SDL_GameController*>(_platformController);
+    if (controller != nullptr) {
+        SDL_GameControllerRumble(
+            controller,
+            static_cast<Uint16>(std::clamp(leftMotor, 0.0f, 1.0f) * 65535.0f),
+            static_cast<Uint16>(std::clamp(rightMotor, 0.0f, 1.0f) * 65535.0f),
+            0xFFFFFFFFu);
+    }
 #else
     (void)leftMotor;
     (void)rightMotor;
 #endif
+}
+
+void GamepadDevice::attachPlatformController(void* controller)
+{
+    _platformController = controller;
+    setConnected(controller != nullptr);
 }
 
 void GamepadDevice::setConnected(bool connected)
@@ -198,6 +276,7 @@ void GamepadDevice::setAxis(GamepadAxis axis, float value)
 
 void GamepadDevice::reset()
 {
+    _platformController = nullptr;
     _connected = false;
     _current.fill(false);
     _previous.fill(false);

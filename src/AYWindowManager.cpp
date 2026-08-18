@@ -98,39 +98,39 @@ bool ayDeviceTraceInputEnabled() {
 #endif
 
 struct WindowManager::Impl {
-#if defined(_WIN32)
-    HWND hwnd = nullptr;
-    HINSTANCE instance = GetModuleHandleW(nullptr);
     int width = 0;
     int height = 0;
     bool resizable = true;
-    std::vector<HWND> childWindows;
-    std::vector<HWND> topLevelWindows;       // D5 — owns HWNDs created by createTopLevelWindow
-
     WindowCloseCallback onClose;
     WindowResizeCallback onResize;
     WindowFocusCallback onFocus;
     WindowMessageCallback onMessage;
-
     KeyCallback onKey;
     MouseButtonCallback onMouseButton;
     MouseMoveCallback onMouseMove;
     MouseDeltaCallback onMouseDelta;
     MouseWheelCallback onMouseWheel;
     std::function<void()> onInputReset;
-
     TouchCallback onTouch;
     CharCallback onChar;
     CompositionCallback onComposition;
     bool touchEnabled = false;
+    bool textInputEnabled = false;
+    bool focused = false;
+    bool relativeMouseRequested = false;
+    bool relativeMouseActive = false;
+
+#if defined(_WIN32)
+    HWND hwnd = nullptr;
+    HINSTANCE instance = GetModuleHandleW(nullptr);
+    std::vector<HWND> childWindows;
+    std::vector<HWND> topLevelWindows;       // D5 — owns HWNDs created by createTopLevelWindow
+
     bool touchRegistered = false;
     // PR-InputTrace: precision trackpad / MagicMouse wheel goes through
     // WM_INPUT (raw input) instead of WM_MOUSEWHEEL. Registered once per
     // window in createWindow; unregistered in destroyWindow.
     bool rawInputRegistered = false;
-    bool focused = false;
-    bool relativeMouseRequested = false;
-    bool relativeMouseActive = false;
     int cursorHideAdjustments = 0;
     unsigned pressedMouseButtons = 0;
 
@@ -630,6 +630,13 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
     _impl->height = info.height;
     _impl->resizable = info.resizable;
     _impl->valid = true;
+    _impl->focused = (SDL_GetWindowFlags(_impl->sdlWindow) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    if (_impl->textInputEnabled) {
+        SDL_StartTextInput();
+    } else {
+        SDL_StopTextInput();
+    }
+    updateRelativeMouseState();
     return true;
 
 #elif defined(_WIN32)
@@ -711,6 +718,8 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
     }
 
     _impl->valid = true;
+    _impl->focused = (::GetFocus() == hwnd);
+    updateRelativeMouseState();
     return true;
 
 #else
@@ -728,10 +737,8 @@ void WindowManager::destroyWindow()
     destroyAllChildWindows();
     destroyAllTopLevelWindows();
 
-#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
     _impl->relativeMouseRequested = false;
     updateRelativeMouseState();
-#endif
 
 #if defined(AY_DEVICE_USE_SDL2)
     if (_impl->sdlWindow != nullptr) {
@@ -906,16 +913,16 @@ void WindowManager::notifyFocused(bool focused)
     if (!_impl) {
         return;
     }
-#if defined(_WIN32)
     _impl->focused = focused;
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
     if (!focused) {
         _impl->pressedMouseButtons = 0;
         if (_impl->hwnd != nullptr && ::GetCapture() == _impl->hwnd) {
             ::ReleaseCapture();
         }
     }
-    updateRelativeMouseState();
 #endif
+    updateRelativeMouseState();
     if (!focused && _impl->onInputReset) {
         _impl->onInputReset();
     }
@@ -978,106 +985,94 @@ void WindowManager::setWindowMessageCallback(WindowMessageCallback callback)
 
 void WindowManager::setKeyCallback(KeyCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onKey = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setMouseButtonCallback(MouseButtonCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onMouseButton = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setMouseMoveCallback(MouseMoveCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onMouseMove = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setMouseDeltaCallback(MouseDeltaCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onMouseDelta = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setMouseWheelCallback(MouseWheelCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onMouseWheel = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setTouchCallback(TouchCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onTouch = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setCharCallback(CharCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onChar = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 void WindowManager::setCompositionCallback(CompositionCallback callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onComposition = std::move(callback);
     }
-#else
-    (void)callback;
+}
+
+void WindowManager::setTextInputEnabled(bool enabled)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->textInputEnabled = enabled;
+#if defined(AY_DEVICE_USE_SDL2)
+    if (_impl->sdlWindow != nullptr) {
+        if (enabled) {
+            SDL_StartTextInput();
+        } else {
+            SDL_StopTextInput();
+        }
+    }
 #endif
 }
 
 void WindowManager::setInputResetCallback(std::function<void()> callback)
 {
-#if defined(_WIN32)
     if (_impl) {
         _impl->onInputReset = std::move(callback);
     }
-#else
-    (void)callback;
-#endif
 }
 
 bool WindowManager::setRelativeMouseMode(bool enabled)
 {
-#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+#if defined(AY_DEVICE_USE_SDL2)
+    if (!_impl || !_impl->valid || _impl->sdlWindow == nullptr) {
+        return false;
+    }
+    _impl->relativeMouseRequested = enabled;
+    updateRelativeMouseState();
+    return !enabled || !_impl->focused || _impl->relativeMouseActive;
+#elif defined(_WIN32)
     if (!_impl || !_impl->valid || _impl->hwnd == nullptr) {
         return false;
     }
@@ -1092,7 +1087,7 @@ bool WindowManager::setRelativeMouseMode(bool enabled)
 
 bool WindowManager::isRelativeMouseMode() const
 {
-#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+#if defined(AY_DEVICE_USE_SDL2) || defined(_WIN32)
     return _impl && _impl->relativeMouseRequested;
 #else
     return false;
@@ -1101,7 +1096,22 @@ bool WindowManager::isRelativeMouseMode() const
 
 void WindowManager::updateRelativeMouseState()
 {
-#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
+#if defined(AY_DEVICE_USE_SDL2)
+    if (!_impl) {
+        return;
+    }
+    const bool shouldBeActive = _impl->relativeMouseRequested
+                             && _impl->focused
+                             && _impl->valid
+                             && _impl->sdlWindow != nullptr;
+    if (shouldBeActive == _impl->relativeMouseActive) {
+        return;
+    }
+    if (SDL_SetRelativeMouseMode(shouldBeActive ? SDL_TRUE : SDL_FALSE) == 0) {
+        SDL_CaptureMouse(shouldBeActive ? SDL_TRUE : SDL_FALSE);
+        _impl->relativeMouseActive = shouldBeActive;
+    }
+#elif defined(_WIN32)
     if (!_impl) {
         return;
     }
@@ -1180,11 +1190,11 @@ void WindowManager::handleMouseButton(MouseButton button, bool pressed)
 
 void WindowManager::setTouchEnabled(bool enabled)
 {
-#if defined(_WIN32)
     if (!_impl) {
         return;
     }
     _impl->touchEnabled = enabled;
+#if defined(_WIN32) && !defined(AY_DEVICE_USE_SDL2)
     if (_impl->hwnd == nullptr) {
         return;  // applied on next createWindow via ensureTouchRegistration
     }
@@ -1196,8 +1206,6 @@ void WindowManager::setTouchEnabled(bool enabled)
         UnregisterTouchWindow(_impl->hwnd);
         _impl->touchRegistered = false;
     }
-#else
-    (void)enabled;
 #endif
 }
 

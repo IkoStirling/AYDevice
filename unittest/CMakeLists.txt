@@ -17,6 +17,17 @@ add_executable(${TEST_NAME}
     Test_RawInputBridge.cpp
 )
 
+if(AY_DEVICE_USE_SDL2)
+    # Keep backend translation tests isolated from AYDevice_Test's large
+    # AYApplication/AYScript dependency closure so SDL parity checks remain a
+    # small incremental build.
+    add_executable(AYDevice_SDL_Test TestMain.cpp Test_SdlInput.cpp)
+    target_include_directories(AYDevice_SDL_Test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+    target_compile_definitions(AYDevice_SDL_Test PRIVATE AY_DEVICE_USE_SDL2)
+    target_link_libraries(AYDevice_SDL_Test PRIVATE AYDevice AYTest SDL2::SDL2)
+    ay_add_test(AYDevice_SDL_Test)
+endif()
+
 target_include_directories(${TEST_NAME} PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/..
     # INT-03: AYApplication/AppEventHost.h (EventBusHostScope) lives here.
@@ -34,3 +45,19 @@ target_link_libraries(${TEST_NAME} PRIVATE
 )
 
 ay_add_test(${TEST_NAME})
+
+# Fast backend/core regression target. It deliberately excludes Config and
+# SubSystem bridge tests so changing a platform backend does not rebuild the
+# AYApplication/AYScript dependency closure.
+add_executable(AYDevice_Core_Test
+    TestMain.cpp
+    Test_WindowManager.cpp
+    Test_Input.cpp
+    Test_Gamepad.cpp
+    Test_TouchText.cpp
+    Test_WindowManager_TopLevel.cpp
+    Test_RawInputBridge.cpp
+)
+target_include_directories(AYDevice_Core_Test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
+target_link_libraries(AYDevice_Core_Test PRIVATE AYDevice AYTest)
+ay_add_test(AYDevice_Core_Test)

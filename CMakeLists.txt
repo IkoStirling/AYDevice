@@ -47,7 +47,7 @@ option(AY_DEVICE_USE_SDL2 "Use SDL2 backend for WindowManager" OFF)
 if(AY_DEVICE_USE_SDL2)
     find_package(SDL2 REQUIRED)
     target_compile_definitions(${PROJECT_NAME} PRIVATE AY_DEVICE_USE_SDL2)
-    target_link_libraries(${PROJECT_NAME} PUBLIC SDL2::SDL2)
+    target_link_libraries(${PROJECT_NAME} PRIVATE SDL2::SDL2)
 endif()
 
 if(WIN32)
