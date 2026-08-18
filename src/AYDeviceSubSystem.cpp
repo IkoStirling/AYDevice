@@ -52,6 +52,9 @@ const ayt::game::SubSystemDescriptor& DeviceSubSystem::getDescriptor() const
         .dependencies = {},
         .basePriority = 0,  // first to init / update: poll before consumers read
         .timeType = ayt::game::SubSystemDescriptor::TimeType::Unscaled,
+        .phases = ayt::game::phaseBit(ayt::game::FramePhase::Platform),
+        .clock = ayt::game::ClockDomain::Unscaled,
+        .phasePriority = 0,
     };
     return desc;
 }
