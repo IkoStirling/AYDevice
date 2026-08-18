@@ -39,6 +39,18 @@ public:
     bool isActionJustPressed(std::string_view action) const;
     bool isActionJustReleased(std::string_view action) const;
 
+    // Deterministic fixed-tick snapshot. Platform captures input for the next
+    // sim tick; multiple render frames targeting the same tick merge edges.
+    // Catch-up ticks reuse held/axis values but consume press/release edges
+    // exactly once.
+    void captureTickInputFrame(uint64_t targetSimTick);
+    void beginSimulationTick(uint64_t simTick);
+    bool isTickActionPressed(std::string_view action) const;
+    bool isTickActionJustPressed(std::string_view action) const;
+    bool isTickActionJustReleased(std::string_view action) const;
+    float getTickAxisValue(std::string_view axis) const;
+    uint64_t getCurrentInputSimTick() const { return _currentInputSimTick; }
+
     // ===== Axis binding (continuous -1..1) =====
     struct KeyPair {
         KeyCode negative = KeyCode::Unknown;
@@ -59,6 +71,13 @@ public:
     template<typename Fn>
     void forEachAction(Fn&& fn) const {
         for (const auto& kv : _actions) {
+            fn(std::string_view(kv.first));
+        }
+    }
+
+    template<typename Fn>
+    void forEachAxis(Fn&& fn) const {
+        for (const auto& kv : _axes) {
             fn(std::string_view(kv.first));
         }
     }
@@ -120,6 +139,18 @@ private:
     std::unordered_map<std::string, ActionBinding> _actions;
     std::unordered_map<std::string, AxisBinding>   _axes;
     std::unordered_map<std::string, Axis2DBinding> _axes2D;
+
+    struct TickActionState {
+        bool pressed = false;
+        bool justPressed = false;
+        bool justReleased = false;
+    };
+    std::unordered_map<std::string, TickActionState> _pendingTickActions;
+    std::unordered_map<std::string, float> _pendingTickAxes;
+    std::unordered_map<std::string, TickActionState> _currentTickActions;
+    std::unordered_map<std::string, float> _currentTickAxes;
+    uint64_t _pendingInputSimTick = 0;
+    uint64_t _currentInputSimTick = 0;
 };
 
 } // namespace ayt::device

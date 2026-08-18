@@ -141,6 +141,37 @@ TEST_CASE(test_mapping_axis_scale) {
     CHECK(mapping.getAxisValue("Look") == 2.5f);
 }
 
+TEST_CASE(test_tick_snapshot_consumes_edges_once_across_catch_up_ticks) {
+    KeyboardDevice kb;
+    InputMapping mapping;
+    mapping.setKeyboard(&kb);
+
+    const KeyCode jumpKeys[] = {KeyCode::Space};
+    mapping.bindAction("Jump", jumpKeys);
+
+    kb.newFrame();
+    kb.onKeyDown(KeyCode::Space);
+    mapping.captureTickInputFrame(41);
+
+    mapping.beginSimulationTick(41);
+    CHECK(mapping.getCurrentInputSimTick() == 41);
+    CHECK(mapping.isTickActionPressed("Jump"));
+    CHECK(mapping.isTickActionJustPressed("Jump"));
+
+    // A catch-up tick inherits held state, but an input edge is never replayed.
+    mapping.beginSimulationTick(42);
+    CHECK(mapping.isTickActionPressed("Jump"));
+    CHECK(!mapping.isTickActionJustPressed("Jump"));
+    CHECK(!mapping.isTickActionJustReleased("Jump"));
+
+    kb.newFrame();
+    kb.onKeyUp(KeyCode::Space);
+    mapping.captureTickInputFrame(43);
+    mapping.beginSimulationTick(43);
+    CHECK(!mapping.isTickActionPressed("Jump"));
+    CHECK(mapping.isTickActionJustReleased("Jump"));
+}
+
 // M1 (2026-07-15): thin 2-axis wrapper tests. Convention:
 //   bindAxis2D("move", "move_x", "move_y")
 // composes two already-bound 1-D axes by name. getAxis2D calls

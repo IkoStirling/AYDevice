@@ -52,11 +52,27 @@ const ayt::game::SubSystemDescriptor& DeviceSubSystem::getDescriptor() const
         .dependencies = {},
         .basePriority = 0,  // first to init / update: poll before consumers read
         .timeType = ayt::game::SubSystemDescriptor::TimeType::Unscaled,
-        .phases = ayt::game::phaseBit(ayt::game::FramePhase::Platform),
+        .phases = ayt::game::phaseBit(ayt::game::FramePhase::Platform)
+                | ayt::game::phaseBit(ayt::game::FramePhase::FixedPrePhysics),
         .clock = ayt::game::ClockDomain::Unscaled,
         .phasePriority = 0,
+        .reads = {},
+        .writes = {"Input.TickFrame"},
     };
     return desc;
+}
+
+void DeviceSubSystem::tick(ayt::game::FramePhase phase,
+                           const ayt::game::FrameContext& context)
+{
+    if (phase == ayt::game::FramePhase::Platform) {
+        update(context.deltaTime);
+        if (_ready) {
+            _devices.mapping().captureTickInputFrame(context.simTick + 1);
+        }
+    } else if (phase == ayt::game::FramePhase::FixedPrePhysics && _ready) {
+        _devices.mapping().beginSimulationTick(context.simTick);
+    }
 }
 
 bool DeviceSubSystem::initialize()

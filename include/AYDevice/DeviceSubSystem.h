@@ -42,6 +42,8 @@ public:
     bool initialize() override;
     void update(float deltaTime) override;
     void fixedUpdate(float /*fixedDeltaTime*/) override {}
+    void tick(ayt::game::FramePhase phase,
+              const ayt::game::FrameContext& context) override;
     void shutdown() override;
 
     // ===== Access =====

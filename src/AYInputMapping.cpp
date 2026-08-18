@@ -172,6 +172,69 @@ bool InputMapping::isActionJustReleased(std::string_view action) const
     return false;
 }
 
+void InputMapping::captureTickInputFrame(uint64_t targetSimTick)
+{
+    if (targetSimTick == 0) return;
+    if (_pendingInputSimTick != 0 && _pendingInputSimTick != targetSimTick) {
+        _pendingTickActions.clear();
+        _pendingTickAxes.clear();
+    }
+    _pendingInputSimTick = targetSimTick;
+
+    forEachAction([&](std::string_view action) {
+        TickActionState& state = _pendingTickActions[std::string(action)];
+        state.pressed = isActionPressed(action);
+        state.justPressed = state.justPressed || isActionJustPressed(action);
+        state.justReleased = state.justReleased || isActionJustReleased(action);
+    });
+    forEachAxis([&](std::string_view axis) {
+        _pendingTickAxes[std::string(axis)] = getAxisValue(axis);
+    });
+}
+
+void InputMapping::beginSimulationTick(uint64_t simTick)
+{
+    _currentInputSimTick = simTick;
+    if (_pendingInputSimTick != 0 && _pendingInputSimTick <= simTick) {
+        _currentTickActions = std::move(_pendingTickActions);
+        _currentTickAxes = std::move(_pendingTickAxes);
+        _pendingTickActions.clear();
+        _pendingTickAxes.clear();
+        _pendingInputSimTick = 0;
+        return;
+    }
+
+    // Held values persist across catch-up ticks; edges are one-shot.
+    for (auto& pair : _currentTickActions) {
+        pair.second.justPressed = false;
+        pair.second.justReleased = false;
+    }
+}
+
+bool InputMapping::isTickActionPressed(std::string_view action) const
+{
+    auto it = _currentTickActions.find(std::string(action));
+    return it != _currentTickActions.end() && it->second.pressed;
+}
+
+bool InputMapping::isTickActionJustPressed(std::string_view action) const
+{
+    auto it = _currentTickActions.find(std::string(action));
+    return it != _currentTickActions.end() && it->second.justPressed;
+}
+
+bool InputMapping::isTickActionJustReleased(std::string_view action) const
+{
+    auto it = _currentTickActions.find(std::string(action));
+    return it != _currentTickActions.end() && it->second.justReleased;
+}
+
+float InputMapping::getTickAxisValue(std::string_view axis) const
+{
+    auto it = _currentTickAxes.find(std::string(axis));
+    return it != _currentTickAxes.end() ? it->second : 0.0f;
+}
+
 float InputMapping::getAxisValue(std::string_view axis) const
 {
     const AxisBinding* binding = findAxis(axis);
