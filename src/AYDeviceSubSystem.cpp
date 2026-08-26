@@ -55,7 +55,12 @@ const ayt::game::SubSystemDescriptor& DeviceSubSystem::getDescriptor() const
         .phases = ayt::game::phaseBit(ayt::game::FramePhase::Platform)
                 | ayt::game::phaseBit(ayt::game::FramePhase::FixedPrePhysics),
         .clock = ayt::game::ClockDomain::Unscaled,
-        .phasePriority = 0,
+        // Input.TickFrame producers must sort ahead of consumers before the
+        // phase-local resource hazard pass serializes the conflicting batch.
+        // This avoids a hard name dependency: editor hosts may provide input
+        // through an externally-owned DeviceManager instead of registering
+        // this window-owning subsystem.
+        .phasePriority = 1000,
         .reads = {},
         .writes = {"Input.TickFrame"},
     };

@@ -16,6 +16,15 @@ TEST_CASE(test_subsystem_descriptor) {
     CHECK(desc.basePriority == 0);
     CHECK(desc.dependencies.empty());
     CHECK(desc.timeType == ayt::game::SubSystemDescriptor::TimeType::Unscaled);
+    CHECK(desc.phasePriority == 1000);
+    bool writesInputFrame = false;
+    for (const char* resource : desc.writes) {
+        if (resource && std::string(resource) == "Input.TickFrame") {
+            writesInputFrame = true;
+            break;
+        }
+    }
+    CHECK(writesInputFrame);
 }
 
 TEST_CASE(test_subsystem_lifecycle) {
