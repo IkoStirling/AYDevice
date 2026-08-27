@@ -167,6 +167,24 @@ bool DeviceManager::initialize(const DeviceConfig& config)
 
 void DeviceManager::wireInputCallbacks()
 {
+    // L9 (2026-08-26): every std::function installed on
+    // _windowManager below captures `this` raw. The capture is
+    // safe ONLY because:
+    //   1. shutdown() (see L6 ordering contract) calls
+    //      _windowManager.destroyWindow() BEFORE any device
+    //      state is reset, which clears all callbacks on the
+    //      window-manager side before this DeviceManager can
+    //      vanish. After that point, even if a stray platform
+    //      event still reaches the destroyed WindowManager, no
+    //      callback fires (it was cleared).
+    //   2. shutdown() runs at static-deinit time at the latest
+    //      (the AYApplication lifecycle owns DeviceManager as
+    //      a member, never as a raw heap pointer).
+    //   3. Callers cannot swap _windowManager's callbacks
+    //      externally — they're installed once here.
+    // If any future change makes _windowManager outlive this
+    // DeviceManager, every lambda below becomes a use-after-free
+    // and the fix is to std::weak_ptr-capture a shared owner.
     if (_keyboardEnabled) {
         _windowManager.setKeyCallback([this](KeyCode key, bool pressed) {
             if (pressed) {
@@ -217,6 +235,21 @@ void DeviceManager::wireInputCallbacks()
         _windowManager.setTextInputEnabled(enabled);
     });
 
+    // L10 (2026-08-26): this callback fires on platform focus-loss
+    // (Win32 WM_KILLFOCUS, SDL2 SDL_WINDOWEVENT_FOCUS_LOST, etc.).
+    // We drop ALL active input state, not just press/release pairs:
+    //   - keyboard + mouse buttons: prevent a "stuck key" report when
+    //     the user alt-tabs while holding a key (Win32 stops sending
+    //     WM_KEYUP after focus loss in some RDP scenarios).
+    //   - touch: cancel every in-flight finger. A touch session that
+    //     is alive across focus loss is invalid — when focus comes back,
+    //     SDL's SDL_FINGERDOWN ID is no longer meaningful and continuing
+    //     to track it produces an orphan End at the wrong coordinates
+    //     (this is the orphan-drop path L15 instrumented).
+    //   - IME composition: terminate the in-progress composition string.
+    //     IME re-asserts a new composition on focus regain; if we leave
+    //     the old one alive, the first character typed after refocus
+    //     appends to stale text.
     _windowManager.setInputResetCallback([this]() {
         if (_keyboardEnabled) {
             _keyboard.releaseAll();
@@ -255,6 +288,26 @@ void DeviceManager::shutdown()
         return;
     }
 
+    // L6 (2026-08-26): ordering contract.
+    //   shutdownPlatformGamepads() MUST come before any device
+    //   reset(): gamepad callbacks in newer XInput builds still
+    //   race the slot table during raw-input teardown.
+    //   _textInput.setEnabled(false) MUST come before
+    //   _windowManager.destroyWindow(): destroying the HWND while
+    //   IME is still subscribed causes IME to send one last
+    //   WM_IME_COMPOSITION to a half-torn-down window, which
+    //   triggers the per-window surrogate-high map leak that L1
+    //   guarded against.
+    //   _windowManager.destroyWindow() MUST come before
+    //   _keyboard.reset()/_mouse.reset()/_gamepads[i].reset()/
+    //   _touch.reset()/_textInput.reset(): those resets fire
+    //   edge->pressed signals back into the window-manager
+    //   callbacks we wired in wireInputCallbacks(). Once the
+    //   window is gone, the callbacks are no-ops.
+    //   _keyboardEnabled = false (etc.) MUST come last, after the
+    //   device resets: pollEvents() and tick consumers gate on
+    //   these flags; flipping them before reset would expose a
+    //   one-tick window of "enabled=true, slot=empty" reads.
     shutdownPlatformGamepads();
     _textInput.setEnabled(false);
     _windowManager.destroyWindow();
@@ -297,8 +350,15 @@ void DeviceManager::pollEvents()
     _textInput.newFrame();
 
 #if defined(AY_DEVICE_USE_SDL2)
+    // L8 (2026-08-26): cap the per-frame event drain to bound CPU under
+    // event-queue flooding (e.g. rapid key repeat, mouse move storms
+    // from high-Hz mice). Without a cap a single frame can spend
+    // arbitrarily long in pollEvents(). 256 is well above the
+    // legitimate per-frame ceiling (typical game frame: ~10 events).
+    constexpr int kMaxEventsPerFrame = 256;
+    int drained = 0;
     SDL_Event event{};
-    while (SDL_PollEvent(&event)) {
+    while (drained++ < kMaxEventsPerFrame && SDL_PollEvent(&event)) {
         switch (event.type) {
         case SDL_QUIT:
             _windowManager.notifyClosed();

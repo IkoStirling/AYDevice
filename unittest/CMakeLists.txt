@@ -46,9 +46,27 @@ target_link_libraries(${TEST_NAME} PRIVATE
 
 ay_add_test(${TEST_NAME})
 
+# L25 (2026-08-26): AYDevice_Test is intentionally heavy. It pulls
+# AYDeviceConfig (links AYConfig + transitive nlohmann_json),
+# AYDeviceSubSystem (links AYGameLoop + AYScript for the Logia
+# InputProvider seam + AYApplication for the EventBus bridge), and
+# the full AYApplication chain. This is what makes Test_DeviceSubSystem
+# + Test_DeviceEventBridge + Test_InputProfileConfig possible. The
+# alternative — splitting each bridge into its own executable — was
+# considered and rejected: it duplicates TestMain.cpp N times and
+# multiplies the AYApplication link cost by N. Keep one heavy target.
+
 # Fast backend/core regression target. It deliberately excludes Config and
 # SubSystem bridge tests so changing a platform backend does not rebuild the
 # AYApplication/AYScript dependency closure.
+
+# L24 (2026-08-26): AYDevice_Core_Test scope. Backend input regression
+# (Keyboard / Mouse / Gamepad / Text / Touch + WindowManager + the
+# D5 top-level HWND path + raw-input wheel bridge parser). It does NOT
+# cover InputProfileConfig (needs AYConfig) or DeviceSubSystem
+# (needs AYGameLoop + AYScript + AYApplication). Use this target for
+# the hot inner-loop during backend iterations; use AYDevice_Test for
+# full-suite verification.
 add_executable(AYDevice_Core_Test
     TestMain.cpp
     Test_WindowManager.cpp

@@ -6,45 +6,70 @@
 
 namespace ayt::device {
 
+// L11+L12 (2026-08-26): heterogeneous map type is std::unordered_map
+// with std::hash<std::string_view> + std::equal_to<void>. MSVC's
+// `operator[]` does NOT have a transparent overload (libc++ / libstdc++
+// do). To get the heterogeneous semantics portably, every bind*
+// helper below uses an explicit find() + emplace() pair instead of
+// subscript. Hot-path readers (isActionPressed / getAxisValue /
+// findAction / findAxis / findAxis2D) use find() which IS
+// transparent on all three STLs. The alloc cost is concentrated on
+// the rare bind path (one-shot at startup / rebind), and the hot
+// path stays zero-alloc.
 void InputMapping::bindAction(std::string_view action, std::span<const KeyCode> keys)
 {
-    ActionBinding& binding = _actions[std::string(action)];
-    binding.keys.assign(keys.begin(), keys.end());
+    auto it = _actions.find(action);
+    if (it == _actions.end()) {
+        it = _actions.emplace(std::string(action), ActionBinding{}).first;
+    }
+    it->second.keys.assign(keys.begin(), keys.end());
 }
 
 void InputMapping::bindActionMouse(std::string_view action, std::span<const MouseButton> buttons)
 {
-    ActionBinding& binding = _actions[std::string(action)];
-    binding.buttons.assign(buttons.begin(), buttons.end());
+    auto it = _actions.find(action);
+    if (it == _actions.end()) {
+        it = _actions.emplace(std::string(action), ActionBinding{}).first;
+    }
+    it->second.buttons.assign(buttons.begin(), buttons.end());
 }
 
 void InputMapping::bindActionGamepad(std::string_view action, std::span<const GamepadButton> buttons)
 {
-    ActionBinding& binding = _actions[std::string(action)];
-    binding.gamepadButtons.assign(buttons.begin(), buttons.end());
+    auto it = _actions.find(action);
+    if (it == _actions.end()) {
+        it = _actions.emplace(std::string(action), ActionBinding{}).first;
+    }
+    it->second.gamepadButtons.assign(buttons.begin(), buttons.end());
 }
 
 void InputMapping::clearAction(std::string_view action)
 {
-    _actions.erase(std::string(action));
+    _actions.erase(action);
 }
 
 void InputMapping::bindAxis(std::string_view axis, std::span<const KeyPair> pairs, float scale)
 {
-    AxisBinding& binding = _axes[std::string(axis)];
-    binding.pairs.assign(pairs.begin(), pairs.end());
-    binding.scale = scale;
+    auto it = _axes.find(axis);
+    if (it == _axes.end()) {
+        it = _axes.emplace(std::string(axis), AxisBinding{}).first;
+    }
+    it->second.pairs.assign(pairs.begin(), pairs.end());
+    it->second.scale = scale;
 }
 
 void InputMapping::bindAxisGamepad(std::string_view axis, GamepadAxis gamepadAxis, float scale)
 {
-    AxisBinding& binding = _axes[std::string(axis)];
-    binding.gamepadAxes.push_back(GamepadAxisSource{gamepadAxis, scale});
+    auto it = _axes.find(axis);
+    if (it == _axes.end()) {
+        it = _axes.emplace(std::string(axis), AxisBinding{}).first;
+    }
+    it->second.gamepadAxes.push_back(GamepadAxisSource{gamepadAxis, scale});
 }
 
 void InputMapping::clearAxis(std::string_view axis)
 {
-    _axes.erase(std::string(axis));
+    _axes.erase(axis);
 }
 
 // M1 (2026-07-15): thin 2-axis binding. Records xAxis / yAxis names;
@@ -54,31 +79,34 @@ void InputMapping::bindAxis2D(std::string_view name,
                               std::string_view xAxis,
                               std::string_view yAxis)
 {
-    Axis2DBinding& b = _axes2D[std::string(name)];
-    b.xAxis = std::string(xAxis);
-    b.yAxis = std::string(yAxis);
+    auto it = _axes2D.find(name);
+    if (it == _axes2D.end()) {
+        it = _axes2D.emplace(std::string(name), Axis2DBinding{}).first;
+    }
+    it->second.xAxis = std::string(xAxis);
+    it->second.yAxis = std::string(yAxis);
 }
 
 void InputMapping::clearAxis2D(std::string_view name)
 {
-    _axes2D.erase(std::string(name));
+    _axes2D.erase(name);
 }
 
 const InputMapping::ActionBinding* InputMapping::findAction(std::string_view action) const
 {
-    auto it = _actions.find(std::string(action));
+    auto it = _actions.find(action);
     return it != _actions.end() ? &it->second : nullptr;
 }
 
 const InputMapping::AxisBinding* InputMapping::findAxis(std::string_view axis) const
 {
-    auto it = _axes.find(std::string(axis));
+    auto it = _axes.find(axis);
     return it != _axes.end() ? &it->second : nullptr;
 }
 
 const InputMapping::Axis2DBinding* InputMapping::findAxis2D(std::string_view name) const
 {
-    auto it = _axes2D.find(std::string(name));
+    auto it = _axes2D.find(name);
     return it != _axes2D.end() ? &it->second : nullptr;
 }
 
@@ -182,13 +210,21 @@ void InputMapping::captureTickInputFrame(uint64_t targetSimTick)
     _pendingInputSimTick = targetSimTick;
 
     forEachAction([&](std::string_view action) {
-        TickActionState& state = _pendingTickActions[std::string(action)];
+        auto it = _pendingTickActions.find(action);
+        if (it == _pendingTickActions.end()) {
+            it = _pendingTickActions.emplace(std::string(action), TickActionState{}).first;
+        }
+        TickActionState& state = it->second;
         state.pressed = isActionPressed(action);
         state.justPressed = state.justPressed || isActionJustPressed(action);
         state.justReleased = state.justReleased || isActionJustReleased(action);
     });
     forEachAxis([&](std::string_view axis) {
-        _pendingTickAxes[std::string(axis)] = getAxisValue(axis);
+        auto it = _pendingTickAxes.find(axis);
+        if (it == _pendingTickAxes.end()) {
+            it = _pendingTickAxes.emplace(std::string(axis), 0.0f).first;
+        }
+        it->second = getAxisValue(axis);
     });
 }
 
@@ -213,25 +249,25 @@ void InputMapping::beginSimulationTick(uint64_t simTick)
 
 bool InputMapping::isTickActionPressed(std::string_view action) const
 {
-    auto it = _currentTickActions.find(std::string(action));
+    auto it = _currentTickActions.find(action);
     return it != _currentTickActions.end() && it->second.pressed;
 }
 
 bool InputMapping::isTickActionJustPressed(std::string_view action) const
 {
-    auto it = _currentTickActions.find(std::string(action));
+    auto it = _currentTickActions.find(action);
     return it != _currentTickActions.end() && it->second.justPressed;
 }
 
 bool InputMapping::isTickActionJustReleased(std::string_view action) const
 {
-    auto it = _currentTickActions.find(std::string(action));
+    auto it = _currentTickActions.find(action);
     return it != _currentTickActions.end() && it->second.justReleased;
 }
 
 float InputMapping::getTickAxisValue(std::string_view axis) const
 {
-    auto it = _currentTickAxes.find(std::string(axis));
+    auto it = _currentTickAxes.find(axis);
     return it != _currentTickAxes.end() ? it->second : 0.0f;
 }
 
@@ -242,8 +278,26 @@ float InputMapping::getAxisValue(std::string_view axis) const
         return 0.0f;
     }
 
-    float value = 0.0f;
-    if (_keyboard != nullptr) {
+    // L13 (2026-08-26): composite-clamp semantic.
+    //
+    //   - Single-source binding (one keyboard pair OR one gamepad axis)
+    //     honors the caller's scale verbatim. bindAxis("Look", pairs,
+    //     2.5f) returns 2.5 at full positive so a per-source sensitivity
+    //     multiplier is preserved end-to-end.
+    //
+    //   - Multi-source binding (keyboard + gamepad summed, or multiple
+    //     gamepad axes summed) clamps to [-1, 1] so the composite does
+    //     not exceed the canonical analog range.
+    //
+    // The discriminator is whether both contributions produced
+    // non-zero magnitude (i.e. both keyboard AND gamepad contributed).
+    // We track each contribution's sign of non-zero magnitude, then
+    // sum, then decide whether to clamp based on whether the sum came
+    // from one source or two.
+
+    float keyContribution = 0.0f;
+    bool  keyActive = false;
+    if (_keyboard != nullptr && !binding->pairs.empty()) {
         float keyValue = 0.0f;
         for (const KeyPair& pair : binding->pairs) {
             if (pair.positive != KeyCode::Unknown && _keyboard->isKeyPressed(pair.positive)) {
@@ -253,29 +307,45 @@ float InputMapping::getAxisValue(std::string_view axis) const
                 keyValue -= 1.0f;
             }
         }
-        // Clamp the digital sum before applying scale; scale may exceed 1.
+        // Clamp the digital sum to [-1, 1] before applying scale: a
+        // single binding is W/S (one of them at a time) so the
+        // numeric range shouldn't exceed ±1 even before scale.
         if (keyValue > 1.0f) {
             keyValue = 1.0f;
         } else if (keyValue < -1.0f) {
             keyValue = -1.0f;
         }
-        value += keyValue * binding->scale;
+        keyContribution = keyValue * binding->scale;
+        keyActive = (keyContribution != 0.0f);
     }
 
+    float padContribution = 0.0f;
+    bool  padActive = false;
     if (_gamepad != nullptr && !binding->gamepadAxes.empty()) {
         float gamepadValue = 0.0f;
         for (const GamepadAxisSource& source : binding->gamepadAxes) {
             gamepadValue += _gamepad->getAxis(source.axis) * source.scale;
         }
-        // Combined analog sources clamp to the normalized range.
+        // Multi-gamepad-axis sources are clamped to the normalized
+        // range (composite clamp).
         if (gamepadValue > 1.0f) {
             gamepadValue = 1.0f;
         } else if (gamepadValue < -1.0f) {
             gamepadValue = -1.0f;
         }
-        value += gamepadValue;
+        padContribution = gamepadValue;
+        padActive = (padContribution != 0.0f);
     }
 
+    float value = keyContribution + padContribution;
+
+    // Composite clamp: only when BOTH keyboard and gamepad contributed
+    // (i.e. sum from two sources). A single source returns its raw
+    // scaled value (caller's per-source sensitivity honored).
+    if (keyActive && padActive) {
+        if (value > 1.0f)  value = 1.0f;
+        if (value < -1.0f) value = -1.0f;
+    }
     return value;
 }
 

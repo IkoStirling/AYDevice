@@ -43,9 +43,23 @@ public:
     bool empty() const { return _actions.empty() && _axes.empty(); }
     void clear();
 
+    // L18 (2026-08-26): structured failure list. Each entry identifies
+    // the parent action/axis and the offending token so callers (Editor
+    // rebind UI, Gallery config viewer) can show a precise diagnostic
+    // instead of a bare "N tokens failed to parse".
+    struct ApplyFailure {
+        std::string binding;     // "Jump" / "MoveX"
+        std::string token;       // raw token from the profile
+        std::string reason;      // "unknown key", "empty pair", "both sides unknown"
+    };
+    using ApplyFailures = std::vector<ApplyFailure>;
+
     // Parse tokens and push all bindings into a live mapping. Unparseable tokens
-    // are skipped. Returns the count of tokens that failed to parse.
-    int applyTo(InputMapping& mapping) const;
+    // are recorded in `failures` (cleared first) but do not abort the apply.
+    // Returns the number of tokens that failed to parse.
+    int applyTo(InputMapping& mapping) const;          // discards failures
+    int applyTo(InputMapping& mapping,
+                ApplyFailures& failures) const;         // records each failure
 
     // A sensible default profile (WASD move, Space jump, mouse fire) for
     // bootstrapping when no user profile exists.

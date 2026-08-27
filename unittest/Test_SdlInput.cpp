@@ -124,7 +124,10 @@ TEST_CASE(sdl_focus_loss_releases_held_input) {
 TEST_CASE(sdl_relative_mouse_uses_relative_delta) {
     DeviceManager devices;
     CHECK(devices.initialize(hiddenConfig()));
-    CHECK(devices.window().setRelativeMouseMode(true));
+    // L3 (2026-08-26): RelativeMouseResult — accept any non-Disabled as
+    // success on the SDL2 backend.
+    using R = WindowManager::RelativeMouseResult;
+    CHECK(devices.window().setRelativeMouseMode(true) != R::Disabled);
 
     SDL_Event motion{};
     motion.type = SDL_MOUSEMOTION;

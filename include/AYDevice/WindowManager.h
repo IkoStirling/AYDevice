@@ -47,7 +47,12 @@ public:
 
     // Relative mode uses raw mouse deltas and owns cursor capture/visibility.
     // A requested mode is suspended while unfocused and restored on focus.
-    bool setRelativeMouseMode(bool enabled);
+    enum class RelativeMouseResult {
+        Disabled,           // requested false; cursor released, mode inactive
+        Enabled,            // requested true; cursor captured + hidden
+        Busy,               // window is unfocused; request accepted but suspended
+    };
+    RelativeMouseResult setRelativeMouseMode(bool enabled);
     bool isRelativeMouseMode() const;
 
     // Touch + text/IME callbacks. Touch requires enableTouch (registers the
@@ -86,6 +91,19 @@ public:
     // handle is opaque (`void*` — never include `<Windows.h>` in headers
     // per K-INV-D5-3). Pair with `setTopLevelCallbacks` for resize/close
     // plumbing before the user interacts with the window.
+    //
+    // L27 (2026-08-26): Win32-only path. The SDL2 backend
+    // (AY_DEVICE_USE_SDL2) intentionally does NOT implement these
+    // entry points — the SDL_Window that backs a "main" surface
+    // is the only SDL2 top-level the editor uses. Promoting a child
+    // DockArea to its own OS-level top-level window is a Win32
+    // editor-only feature (D5 was scoped for the Gallery layout
+    // manager). If a future platform needs the same feature, prefer
+    // adding it as a separate code path rather than generalizing
+    // createTopLevelWindow: keeping the SDL branch stub-no-op
+    // avoids forcing SDL2 to learn about per-HWND surrogate
+    // pairing, per-HWND ownership tables, and the multi-window
+    // destroy ordering that the Win32 path implements.
     bool createTopLevelWindow(const TopLevelWindowDesc& desc, void*& outHandle);
     void destroyTopLevelWindow(void* handle);
     void destroyAllTopLevelWindows();

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #if defined(_WIN32)
@@ -142,6 +143,16 @@ struct WindowManager::Impl {
     int gestureTriggerCount = 0;
     int mouseWheelTriggerCount = 0;
 
+    // L2 (2026-08-26): per-pointer trackpad position memory. Each
+    // WM_POINTERUPDATE for a PT_TOUCHPAD pointer stores its last
+    // pixel location; the next fire computes the delta. The map
+    // grows on first contact and shrinks on PT_POINTER-leave; we
+    // don't explicitly prune because pointer ids recycle rarely and
+    // the worst case is a few stale entries.
+    std::unordered_map<UINT32, long> trackpadLastX;
+    std::unordered_map<UINT32, long> trackpadLastY;
+    std::unordered_set<UINT32>       trackpadHasLast;
+
     // WM_CHAR delivers UTF-16; a leading high surrogate is held until its pair.
     wchar_t pendingHighSurrogate = 0;
 #endif
@@ -262,7 +273,14 @@ void handleWmChar(wchar_t unit,
 }
 
 // Per-top-level-window WM_CHAR pairing state (see handleWmChar).
-wchar_t s_topLevelPendingHigh = 0;
+//
+// L1 (2026-08-26): was a single wchar_t; cross-paired surrogates if two
+// top-level windows received interleaved WM_CHAR (e.g. window A's high
+// surrogate + window B's low surrogate → invalid glyph). Per-HWND map
+// keyed under s_topLevelMu so dispatch order is consistent with the
+// callback map. Entries are inserted in WM_NCCREATE and erased in
+// destroyTopLevelWindow / destroyAllTopLevelWindows.
+std::unordered_map<HWND, wchar_t> s_topLevelPendingHigh;
 
 LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
@@ -276,6 +294,9 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(owner));
         std::lock_guard<std::mutex> g(s_topLevelMu);
         s_topLevelOwners[hwnd] = owner;
+        // L1 (2026-08-26): per-HWND surrogate state, inserted at create
+        // so subsequent WM_CHAR lookups never miss a brand-new window.
+        s_topLevelPendingHigh[hwnd] = 0;
         return TRUE;
     }
 
@@ -443,8 +464,11 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     case WM_CHAR:
         if (cbs.onChar) {
-            handleWmChar(static_cast<wchar_t>(wParam), cbs.onChar,
-                         s_topLevelPendingHigh);
+            // L1 (2026-08-26): per-HWND surrogate state. Read/write the
+            // pairing slot under s_topLevelMu so it stays in lock-step
+            // with the callback map.
+            wchar_t& pending = s_topLevelPendingHigh[hwnd];
+            handleWmChar(static_cast<wchar_t>(wParam), cbs.onChar, pending);
         }
         return 0;
     case WM_ERASEBKGND:
@@ -712,6 +736,12 @@ bool WindowManager::createWindow(const WindowCreateInfo& info)
 
     if (info.hidden) {
         ShowWindow(hwnd, SW_HIDE);
+        // L5 (2026-08-26): do NOT call UpdateWindow on a hidden window.
+        // UpdateWindow sends WM_PAINT synchronously; for a hidden window
+        // the surface is irrelevant and the call costs CPU. The visible
+        // branch needs UpdateWindow to validate the first frame so the
+        // editor doesn't flash a class background brush before the
+        // renderer binds.
     } else {
         ShowWindow(hwnd, SW_SHOW);
         UpdateWindow(hwnd);
@@ -1063,25 +1093,32 @@ void WindowManager::setInputResetCallback(std::function<void()> callback)
     }
 }
 
-bool WindowManager::setRelativeMouseMode(bool enabled)
+WindowManager::RelativeMouseResult WindowManager::setRelativeMouseMode(bool enabled)
 {
 #if defined(AY_DEVICE_USE_SDL2)
     if (!_impl || !_impl->valid || _impl->sdlWindow == nullptr) {
-        return false;
+        return RelativeMouseResult::Busy;
     }
     _impl->relativeMouseRequested = enabled;
     updateRelativeMouseState();
-    return !enabled || !_impl->focused || _impl->relativeMouseActive;
+    // L3 (2026-08-26): caller can now distinguish "disabled", "enabled
+    // and active", and "request accepted but window unfocused (mode
+    // suspended until focus returns)". All three are non-error states.
+    if (!enabled) return RelativeMouseResult::Disabled;
+    if (_impl->focused && _impl->relativeMouseActive) return RelativeMouseResult::Enabled;
+    return RelativeMouseResult::Busy;
 #elif defined(_WIN32)
     if (!_impl || !_impl->valid || _impl->hwnd == nullptr) {
-        return false;
+        return RelativeMouseResult::Busy;
     }
     _impl->relativeMouseRequested = enabled;
     updateRelativeMouseState();
-    return !enabled || !_impl->focused || _impl->relativeMouseActive;
+    if (!enabled) return RelativeMouseResult::Disabled;
+    if (_impl->focused && _impl->relativeMouseActive) return RelativeMouseResult::Enabled;
+    return RelativeMouseResult::Busy;
 #else
     (void)enabled;
-    return false;
+    return RelativeMouseResult::Busy;
 #endif
 }
 
@@ -1412,9 +1449,21 @@ void WindowManager::destroyTopLevelWindow(void* handle)
     HWND hwnd = static_cast<HWND>(handle);
     {
         std::lock_guard<std::mutex> g(s_topLevelMu);
+        // L4 (2026-08-26): erase ALL per-HWND state BEFORE calling
+        // DestroyWindow. Once the map entries are gone, the WndProc
+        // for this hwnd becomes a no-op (it falls through to
+        // DefWindowProc) even if Win32 still has a pending message
+        // in its queue. This closes the UAF window where
+        // WM_PAINT/WM_MOVE could be dispatched after the owning
+        // WindowManager* is destroyed but before the HWND is gone.
         s_topLevelCallbacks.erase(hwnd);
         s_topLevelOwners.erase(hwnd);
         s_topLevelBorderlessResizable.erase(hwnd);
+        // L1 (2026-08-26): erase per-HWND surrogate state. Dropping
+        // the entry without flushing the high surrogate is acceptable:
+        // the very last WM_CHAR for a destroyed window is by definition
+        // orphaned (the window is gone).
+        s_topLevelPendingHigh.erase(hwnd);
     }
     auto it = std::find(_impl->topLevelWindows.begin(), _impl->topLevelWindows.end(), hwnd);
     if (it != _impl->topLevelWindows.end()) {
@@ -1442,6 +1491,8 @@ void WindowManager::destroyAllTopLevelWindows()
             s_topLevelCallbacks.erase(hwnd);
             s_topLevelOwners.erase(hwnd);
             s_topLevelBorderlessResizable.erase(hwnd);
+            // L1 (2026-08-26): per-HWND surrogate state cleanup.
+            s_topLevelPendingHigh.erase(hwnd);
         }
     }
     for (HWND hwnd : _impl->topLevelWindows) {
@@ -1621,23 +1672,78 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
         }
         break;
 
-    // PR-InputTrace: WM_POINTERUPDATE is what Windows Precision
-    // trackpads (Dell/HP/Lenovo/Surface) deliver for two-finger
-    // gestures. POINTER_INFO::ptPixelLocation is screen-space;
-    // POINTER_INFO::dwTime / pointerId / pointerFlags are diagnostic.
-    // No wheel parsing yet — this case only counts fires for path
-    // identification. Once we know the trigger rate + field semantics
-    // for the user's trackpad we can implement POINTER_PEN_INFO
-    // wheel delta extraction. Until then this is diagnostic-only.
+    // PR-InputTrace + L2 (2026-08-26): WM_POINTERUPDATE is what
+    // Windows Precision trackpads (Dell/HP/Lenovo/Surface) deliver
+    // for two-finger gestures. POINTER_INFO::ptPixelLocation is
+    // screen-space. When the pointer is a touchpad (pointerType ==
+    // PT_TOUCHPAD) we accumulate position changes between frames and
+    // emit them as wheel deltas in the Y axis (the conventional
+    // trackpad-scroll convention). X delta is logged but not yet
+    // routed to a horizontal wheel seam (deferred to v2 — the main
+    // window's onMouseWheel is single-axis).
     case WM_POINTERUPDATE: {
+        if (_impl->hwnd == nullptr) {
+            break;
+        }
+        const UINT32 pointerId = LOWORD(wParam);
+        POINTER_INPUT_TYPE pointerType{};
+        if (!::GetPointerType(pointerId, &pointerType)
+            || pointerType != PT_TOUCHPAD) {
+            // Diagnostic-only path for non-touchpad pointers (mouse,
+            // pen, touch).
+            if (ayDeviceTraceInputEnabled()) {
+                ++_impl->pointerTriggerCount;
+                if (_impl->pointerTriggerCount == 1 ||
+                    (_impl->pointerTriggerCount % 60) == 0) {
+                    std::fprintf(stderr,
+                        "[AYDevice-InputTrace] WM_POINTERUPDATE fire #%d wParam=0x%p (non-touchpad)\n",
+                        _impl->pointerTriggerCount,
+                        reinterpret_cast<void*>(wParam));
+                }
+            }
+            break;
+        }
+        POINTER_INFO pi{};
+        if (!::GetPointerInfo(pointerId, &pi)) {
+            break;
+        }
+        // Use the per-pointer slot for trackpad panning. Lazy-init the
+        // last position on first fire; thereafter each WM_POINTERUPDATE
+        // yields a delta.
+        auto& slot = _impl->trackpadLastX[pointerId];
+        auto& slotY = _impl->trackpadLastY[pointerId];
+        const bool hadLast = _impl->trackpadHasLast.count(pointerId) != 0;
+        if (!hadLast) {
+            slot = pi.ptPixelLocation.x;
+            slotY = pi.ptPixelLocation.y;
+            _impl->trackpadHasLast.insert(pointerId);
+            break;
+        }
+        const long dx = pi.ptPixelLocation.x - slot;
+        const long dy = pi.ptPixelLocation.y - slotY;
+        slot  = pi.ptPixelLocation.x;
+        slotY = pi.ptPixelLocation.y;
+        if (dy != 0 && _impl->onMouseWheel) {
+            // PR-Dock-TearOff wheel guard: same rationale as WM_INPUT
+            // above — child windows own their own wheel routing.
+            POINT pt = pi.ptPixelLocation;
+            HWND under = ::WindowFromPoint(pt);
+            if (under == nullptr || under == _impl->hwnd
+                || ::IsChild(_impl->hwnd, under)) {
+                // Normalize pixel delta to notches (~120 px per notch,
+                // matching WHEEL_DELTA). Trackpads emit fractional
+                // deltas so the divisor smooths the impulse.
+                _impl->onMouseWheel(-static_cast<float>(dy)
+                                    / static_cast<float>(WHEEL_DELTA));
+            }
+        }
         if (ayDeviceTraceInputEnabled()) {
             ++_impl->pointerTriggerCount;
             if (_impl->pointerTriggerCount == 1 ||
                 (_impl->pointerTriggerCount % 60) == 0) {
                 std::fprintf(stderr,
-                    "[AYDevice-InputTrace] WM_POINTERUPDATE fire #%d wParam=0x%p\n",
-                    _impl->pointerTriggerCount,
-                    reinterpret_cast<void*>(wParam));
+                    "[AYDevice-InputTrace] WM_POINTERUPDATE touchpad fire #%d dx=%ld dy=%ld\n",
+                    _impl->pointerTriggerCount, dx, dy);
             }
         }
         break;

@@ -1,8 +1,25 @@
 #include "AYDevice/TouchDevice.h"
 
 #include <algorithm>
+#include <cstdio>
 
 namespace ayt::device {
+
+namespace {
+// L15 (2026-08-26): touch diagnostic counters. Each per-frame drop is
+// logged once at first occurrence and every 256 thereafter to avoid
+// stderr spam. Enabled by setting AY_DEVICE_TRACE_INPUT=1 (same env
+// flag as WindowManager PR-InputTrace).
+bool ayDeviceTouchTraceEnabled() {
+    static int cached = -1;
+    if (cached < 0) {
+        const char* env = std::getenv("AY_DEVICE_TRACE_INPUT");
+        cached = (env != nullptr && env[0] != '\0' && env[0] != '0') ? 1 : 0;
+    }
+    return cached != 0;
+}
+int s_orphanDropCount = 0;
+} // namespace
 
 TouchDevice::TouchDevice() = default;
 
@@ -61,6 +78,18 @@ void TouchDevice::onTouch(int64_t id, float x, float y, TouchPhase phase)
     if (point == nullptr) {
         // Move/End for an unknown id: treat as a Began so it is not lost.
         if (phase == TouchPhase::Ended || phase == TouchPhase::Cancelled) {
+            // L15 (2026-08-26): diagnostic counter. Track the orphan
+            // End/Cancelled so driver drops are visible in traces.
+            if (ayDeviceTouchTraceEnabled()) {
+                ++s_orphanDropCount;
+                if (s_orphanDropCount == 1 || (s_orphanDropCount % 256) == 0) {
+                    std::fprintf(stderr,
+                        "[AYDevice-InputTrace] TouchDevice orphan drop #%d (id=%lld, phase=%d)\n",
+                        s_orphanDropCount,
+                        static_cast<long long>(id),
+                        static_cast<int>(phase));
+                }
+            }
             return;
         }
         TouchPoint added{};

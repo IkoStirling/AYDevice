@@ -38,6 +38,7 @@ public:
 
 private:
     static int index(KeyCode key);
+    static bool inRange(KeyCode key);  // L17 (2026-08-26)
 
     std::array<bool, kKeyCodeCount> _current{};
     std::array<bool, kKeyCodeCount> _previous{};

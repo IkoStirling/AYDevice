@@ -51,11 +51,26 @@ if(AY_DEVICE_USE_SDL2)
 endif()
 
 if(WIN32)
+    # L26 (2026-08-26): dwmapi.dll is loaded via LoadLibraryW + GetProcAddress
+    # at runtime in AYWindowManager.cpp (the Dwm* entry points are optional
+    # and missing on older Win7-era VMs). DO NOT add `dwmapi.lib` to
+    # target_link_libraries here — that turns the runtime GetProcAddress
+    # fallback into an unresolved external at link time on hosts where
+    # dwmapi.lib is unavailable, even though the code path is never hit.
     target_link_libraries(${PROJECT_NAME} PUBLIC user32 gdi32 xinput9_1_0 imm32)
 endif()
 
 target_link_libraries(${PROJECT_NAME} PUBLIC AYCore)
 
+# L28 (2026-08-26): warning flags are PRIVATE on purpose.
+# Compiling AYDevice with /W4 -Wall -Wextra -Wpedantic generates
+# warnings for AYCore's headers transitively (because PUBLIC link
+# exposes them). If those flags were PUBLIC, every consumer
+# (AYDeviceConfig, AYDeviceSubSystem, AYApplication, Gallery)
+# would inherit the same flags and start failing their own CI
+# builds because of AYDevice's choice. We deliberately keep
+# warnings PRIVATE so each target controls its own warning
+# posture; the PUBLIC interface stays warning-free by design.
 target_compile_options(${PROJECT_NAME} PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>: /W4>
     $<$<CXX_COMPILER_ID:GNU,Clang>: -Wall -Wextra -Wpedantic>

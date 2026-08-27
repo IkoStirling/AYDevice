@@ -135,9 +135,17 @@ TEST_CASE(test_relative_mouse_request_survives_unfocused_window) {
     info.hidden = true;
     CHECK(windows.createWindow(info));
 
-    CHECK(windows.setRelativeMouseMode(true));
+    // L3 (2026-08-26): setRelativeMouseMode now returns RelativeMouseResult
+    // distinguishing Disabled/Enabled/Busy. The enable call should
+    // report Enabled (or Busy, never Disabled); the disable call
+    // reports Disabled (the canonical "we successfully disabled it"
+    // state).
+    using R = WindowManager::RelativeMouseResult;
+    const R onResult  = windows.setRelativeMouseMode(true);
+    CHECK((onResult == R::Enabled || onResult == R::Busy));
     CHECK(windows.isRelativeMouseMode());
-    CHECK(windows.setRelativeMouseMode(false));
+    const R offResult = windows.setRelativeMouseMode(false);
+    CHECK(offResult == R::Disabled);
     CHECK(!windows.isRelativeMouseMode());
 
     windows.destroyWindow();

@@ -59,6 +59,15 @@ std::string_view keyCodeName(KeyCode key)
 
 KeyCode keyCodeFromName(std::string_view name)
 {
+    // L23 (2026-08-26): deliberate linear scan. The lookup tables
+    // are tiny (kKeyCodeCount = ~120, kMouseButtonCount = 5,
+    // kGamepadButtonCount = 15, kGamepadAxisCount = 6), so a hash
+    // map would be (a) larger in static-data size, (b) slower on
+    // first-call cold-cache misses, and (c) require static-init
+    // ordering guarantees (we want the tables to be `constexpr`
+    // so they're link-time baked, not runtime constructed).
+    // The same pattern applies to mouse/gamepad lookups below.
+    // If a future input type grows past ~256 entries, revisit.
     for (int i = 0; i < kKeyCodeCount; ++i) {
         if (kKeyNames[i] == name) {
             return static_cast<KeyCode>(i);

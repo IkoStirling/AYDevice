@@ -136,12 +136,22 @@ void GamepadDevice::poll()
     XINPUT_STATE state{};
     const DWORD result = XInputGetState(static_cast<DWORD>(_slot), &state);
     if (result != ERROR_SUCCESS) {
-        if (_connected) {
-            // Just disconnected: clear so held buttons register as released.
-            _connected = false;
-            _current.fill(false);
-            _axes.fill(0.0f);
+        // L14 (2026-08-26): distinguish disconnected from busy.
+        // ERROR_DEVICE_NOT_CONNECTED is the canonical "unplugged" code;
+        // ERROR_INVALID_PARAMETER indicates the slot is out of range;
+        // any other code (ERROR_EMPTY, ERROR_BUSY, ERROR_TIMEOUT) is a
+        // transient failure and we leave _connected unchanged so the
+        // UI does not flicker to "disconnected" on a single slow poll.
+        if (result == ERROR_DEVICE_NOT_CONNECTED
+            || result == ERROR_INVALID_PARAMETER) {
+            if (_connected) {
+                _connected = false;
+                _current.fill(false);
+                _axes.fill(0.0f);
+            }
         }
+        // Otherwise: transient — keep last state. Caller may still see
+        // stale buttons held, but next successful poll will refresh.
         return;
     }
 

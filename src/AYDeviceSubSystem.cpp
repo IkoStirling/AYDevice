@@ -175,6 +175,24 @@ DeviceSubSystem* DeviceSubSystem::findRegistered()
 
 void DeviceSubSystem::registerSubSystem()
 {
+    // L7 (2026-08-26): static-bool guard + the underlying
+    // SubSystemRegistry own a `new DeviceSubSystem()` whose lifetime
+    // is tied to the GameLoop singleton. The guard prevents double
+    // registration across translation units, but it does NOT prevent
+    // static-deinit order problems: if a TU that called
+    // registerSubSystem() during init is the same TU that tears the
+    // GameLoop down (it isn't — GameLoop is owned by AYApplication),
+    // the deletion path would race. The current contract is:
+    //   - callers invoke registerSubSystem() exactly once during
+    //     early-static init of their consumer translation unit
+    //     (e.g. Gallery's Engine startup).
+    //   - IGameLoop::instance() outlives all static objects in the
+    //     consumer, because GameLoop is owned by AYApplication, which
+    //     is constructed at program start and destroyed at program
+    //     exit (well after our `static bool registered` is gone).
+    // Do NOT change this to a `std::unique_ptr` cached in a function-
+    // local static: function-local statics in headers get duplicated
+    // across TUs (one definition rule violation).
     static bool registered = false;
     if (registered) {
         return;

@@ -12,6 +12,63 @@
 namespace ayt::device {
 
 class KeyboardDevice;
+
+// L11+L12 (2026-08-26): transparent hasher + transparent equality
+// functor for heterogeneous unordered_map lookup against std::string
+// keys. Why custom types instead of std::hash<std::string_view> +
+// std::equal_to<void>:
+//
+//   - std::hash<std::string_view> in MSVC's STL does NOT expose
+//     `is_transparent`. Its specialization only hashes
+//     `basic_string_view<_Elem>` itself, never other key-like
+//     types. So MSVC's transparent find/erase overload is gated
+//     off via `_Has_transparent_overloads = false` in
+//     xhash and the call falls back to the non-transparent
+//     overload that requires a `const std::string&`.
+//
+//   - std::equal_to<void> DOES expose `is_transparent` (it's the
+//     primary template specialization), so it works on MSVC for
+//     the key_equal half.
+//
+// To unify the three STLs (MSVC / libstdc++ / libc++) we define our
+// own pair. The hash delegates to std::hash<std::string_view> for
+// the byte-content hash (so the underlying hash is identical to
+// std::hash<std::string> for equal content). The struct is
+// is_transparent so MSVC's `_Transparent` concept accepts it.
+struct TransparentStringHash {
+    using is_transparent = void;
+    std::size_t operator()(std::string_view text) const noexcept {
+        return std::hash<std::string_view>{}(text);
+    }
+    std::size_t operator()(const std::string& text) const noexcept {
+        return std::hash<std::string>{}(text);
+    }
+    std::size_t operator()(const char* text) const noexcept {
+        return std::hash<std::string_view>{}(text);
+    }
+};
+
+struct TransparentStringEqual {
+    using is_transparent = void;
+    bool operator()(std::string_view a, std::string_view b) const noexcept {
+        return a == b;
+    }
+    bool operator()(const std::string& a, std::string_view b) const noexcept {
+        return a == b;
+    }
+    bool operator()(std::string_view a, const std::string& b) const noexcept {
+        return a == b;
+    }
+    bool operator()(const std::string& a, const std::string& b) const noexcept {
+        return a == b;
+    }
+    bool operator()(const char* a, const std::string& b) const noexcept {
+        return b == a;
+    }
+    bool operator()(const std::string& a, const char* b) const noexcept {
+        return a == b;
+    }
+};
 class MouseDevice;
 class GamepadDevice;
 
@@ -62,6 +119,12 @@ public:
     void bindAxisGamepad(std::string_view axis, GamepadAxis gamepadAxis, float scale = 1.0f);
     void clearAxis(std::string_view axis);
 
+    // L13 (2026-08-26): composite value is clamped to [-1, 1] after the
+    // keyboard + gamepad sum. Callers that bind a single axis source can
+    // exceed ±1 by setting a per-source scale > 1 (e.g. bindAxis
+    // scale=1.5); the final clamp is the consumer's responsibility only
+    // when they explicitly opt out via bindAxisRaw. In all other cases
+    // the returned value is in [-1, 1].
     float getAxisValue(std::string_view axis) const;
 
     bool hasAction(std::string_view action) const;
@@ -136,19 +199,46 @@ private:
     const MouseDevice*    _mouse = nullptr;
     const GamepadDevice*  _gamepad = nullptr;
 
-    std::unordered_map<std::string, ActionBinding> _actions;
-    std::unordered_map<std::string, AxisBinding>   _axes;
-    std::unordered_map<std::string, Axis2DBinding> _axes2D;
+    // L11+L12 (2026-08-26): heterogeneous unordered_map with
+    // TransparentStringHash + TransparentStringEqual so lookups
+    // don't construct a std::string from string_view on every query.
+    // Hot path: isActionPressed / getAxisValue run every frame.
+    //
+    // Why custom hasher/equal (see also the comments on those
+    // structs): MSVC's std::hash<std::string_view> does not expose
+    // `is_transparent`, which is the gate MSVC's STL uses to enable
+    // the transparent find/erase/contains overloads (see xhash's
+    // _Uhash_choose_transparency / _Transparent concepts). The
+    // workaround is a tiny wrapper that exposes `is_transparent` and
+    // delegates to std::hash<std::string_view>/std::hash<std::string>.
+    using ActionMap = std::unordered_map<std::string, ActionBinding,
+                                         TransparentStringHash,
+                                         TransparentStringEqual>;
+    using AxisMap = std::unordered_map<std::string, AxisBinding,
+                                       TransparentStringHash,
+                                       TransparentStringEqual>;
+    using Axis2DMap = std::unordered_map<std::string, Axis2DBinding,
+                                         TransparentStringHash,
+                                         TransparentStringEqual>;
+    ActionMap _actions;
+    AxisMap   _axes;
+    Axis2DMap _axes2D;
 
     struct TickActionState {
         bool pressed = false;
         bool justPressed = false;
         bool justReleased = false;
     };
-    std::unordered_map<std::string, TickActionState> _pendingTickActions;
-    std::unordered_map<std::string, float> _pendingTickAxes;
-    std::unordered_map<std::string, TickActionState> _currentTickActions;
-    std::unordered_map<std::string, float> _currentTickAxes;
+    using TickActionMap = std::unordered_map<std::string, TickActionState,
+                                             TransparentStringHash,
+                                             TransparentStringEqual>;
+    using TickAxisMap = std::unordered_map<std::string, float,
+                                           TransparentStringHash,
+                                           TransparentStringEqual>;
+    TickActionMap _pendingTickActions;
+    TickAxisMap   _pendingTickAxes;
+    TickActionMap _currentTickActions;
+    TickAxisMap   _currentTickAxes;
     uint64_t _pendingInputSimTick = 0;
     uint64_t _currentInputSimTick = 0;
 };

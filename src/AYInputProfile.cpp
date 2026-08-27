@@ -111,7 +111,24 @@ void InputProfile::clear()
 
 int InputProfile::applyTo(InputMapping& mapping) const
 {
+    // Discard-failure overload. Implemented by delegating to the
+    // diagnostic overload with a thread-local sink so we don't have
+    // to duplicate the apply logic. The sink is discarded on return.
+    ApplyFailures sink;
+    return applyTo(mapping, sink);
+}
+
+int InputProfile::applyTo(InputMapping& mapping,
+                          ApplyFailures& failures) const
+{
     int failed = 0;
+    failures.clear();  // L18 (2026-08-26): always reset, even on no-op.
+
+    auto record = [&](const std::string& binding,
+                      const std::string& token,
+                      std::string_view reason) {
+        failures.push_back(ApplyFailure{binding, token, std::string(reason)});
+    };
 
     for (const auto& [action, tokens] : _actions) {
         std::vector<KeyCode>       keys;
@@ -125,6 +142,7 @@ int InputProfile::applyTo(InputMapping& mapping) const
                 if (mouseButtonFromName(view.substr(kMousePrefix.size()), button)) {
                     mouseButtons.push_back(button);
                 } else {
+                    record(action, token, "unknown mouse button");
                     ++failed;
                 }
             } else if (startsWith(view, kPadPrefix)) {
@@ -132,6 +150,7 @@ int InputProfile::applyTo(InputMapping& mapping) const
                 if (gamepadButtonFromName(view.substr(kPadPrefix.size()), button)) {
                     padButtons.push_back(button);
                 } else {
+                    record(action, token, "unknown gamepad button");
                     ++failed;
                 }
             } else {
@@ -139,6 +158,7 @@ int InputProfile::applyTo(InputMapping& mapping) const
                 if (key != KeyCode::Unknown) {
                     keys.push_back(key);
                 } else {
+                    record(action, token, "unknown key");
                     ++failed;
                 }
             }
@@ -168,12 +188,16 @@ int InputProfile::applyTo(InputMapping& mapping) const
                 if (gamepadAxisFromName(axisPart, gamepadAxis)) {
                     mapping.bindAxisGamepad(axis, gamepadAxis, scale);
                 } else {
+                    record(axis, token, "unknown gamepad axis");
                     ++failed;
                 }
                 continue;
             }
 
             // Key pair "neg/pos"; either side may be empty.
+            // L21 (2026-08-26): a token that is a bare "/" has both
+            // sides empty and yields nothing useful — record it as a
+            // failure rather than silently skipping.
             InputMapping::KeyPair pair{};
             const size_t slash = view.find('/');
             const std::string_view negName = slash == std::string_view::npos
@@ -183,18 +207,36 @@ int InputProfile::applyTo(InputMapping& mapping) const
                 ? view
                 : view.substr(slash + 1);
 
+            if (negName.empty() && posName.empty()) {
+                record(axis, token, "empty key pair (bare '/')");
+                ++failed;
+                continue;
+            }
+
             bool ok = false;
+            std::string failReason;
             if (!negName.empty()) {
                 pair.negative = keyCodeFromName(negName);
-                ok = ok || pair.negative != KeyCode::Unknown;
+                if (pair.negative != KeyCode::Unknown) {
+                    ok = true;
+                } else {
+                    failReason = "unknown negative key '" + std::string(negName) + "'";
+                }
             }
             if (!posName.empty()) {
                 pair.positive = keyCodeFromName(posName);
-                ok = ok || pair.positive != KeyCode::Unknown;
+                if (pair.positive != KeyCode::Unknown) {
+                    ok = true;
+                } else if (!failReason.empty()) {
+                    failReason += "; unknown positive key '" + std::string(posName) + "'";
+                } else {
+                    failReason = "unknown positive key '" + std::string(posName) + "'";
+                }
             }
             if (ok) {
                 pairs.push_back(pair);
             } else {
+                record(axis, token, failReason);
                 ++failed;
             }
         }
