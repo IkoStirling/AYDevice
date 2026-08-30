@@ -2,6 +2,7 @@
 
 #include "AYDevice/WindowTypes.h"
 #include "AYDevice/InputTypes.h"
+#include "AYDevice/DeviceInputEvent.h"
 
 #include <cstdint>
 #include <memory>
@@ -38,6 +39,11 @@ public:
     void setWindowFocusCallback(WindowFocusCallback callback);
     void setWindowMessageCallback(WindowMessageCallback callback);
 
+    // Internal typed event seam used by DeviceManager. Application/UI code
+    // should subscribe through DeviceManager::addInputListener so installing a
+    // consumer never replaces keyboard/mouse state maintenance.
+    void setInputEventCallback(DeviceInputEventCallback callback);
+
     // Raw input callbacks. DeviceManager wires these into keyboard/mouse devices.
     void setKeyCallback(KeyCallback callback);
     void setMouseButtonCallback(MouseButtonCallback callback);
@@ -54,6 +60,18 @@ public:
     };
     RelativeMouseResult setRelativeMouseMode(bool enabled);
     bool isRelativeMouseMode() const;
+    bool isFocused() const;
+
+    // Platform-owned cursor presentation for the main window. This keeps UI
+    // hosts free of Win32 LoadCursor/SetCursor calls.
+    void setCursorShape(SystemCursorShape shape);
+    SystemCursorShape cursorShape() const;
+    bool applyCursor() const;
+
+    // Desktop-space pointer position used by multi-window UI hosts for
+    // tear-off movement and redock hit testing. Platform APIs stay inside
+    // AYDevice; callers never query Win32/SDL input state directly.
+    bool getCursorScreenPosition(int& x, int& y) const;
 
     // Touch + text/IME callbacks. Touch requires enableTouch (registers the
     // window for WM_TOUCH); text is always available once wired.
@@ -122,6 +140,7 @@ public:
                                        bool& handled) const;
 
 private:
+    void emitInputEvent(const DeviceInputEvent& event);
     void updateRelativeMouseState();
     void handleMouseButton(MouseButton button, bool pressed);
 

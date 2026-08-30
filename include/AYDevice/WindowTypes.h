@@ -7,6 +7,17 @@
 
 namespace ayt::device {
 
+enum class SystemCursorShape : uint8_t {
+    Arrow,
+    Hand,
+    Text,
+    SizeHorizontal,
+    SizeVertical,
+    SizeNwse,
+    SizeNesw,
+    Move,
+};
+
 struct WindowCreateInfo {
     std::string title = "AY Engine";
     int         width = 1280;
@@ -72,6 +83,7 @@ struct TopLevelWindowDesc {
 struct TopLevelWindowCallbacks {
     std::function<void(int /*width*/, int /*height*/)> onResize;          // fires from WM_SIZE
     std::function<void()>                              onCloseRequested;  // fires from WM_CLOSE
+    std::function<void(bool /*focused*/)>              onFocusChanged;   // WM_SET/KILLFOCUS
 
     // ===== PR-Dock-TearOff input routing =====
     // All coordinates are client-relative to this window.
@@ -87,6 +99,9 @@ struct TopLevelWindowCallbacks {
     std::function<void(KeyCode /*key*/, bool /*pressed*/)> onKey;
     // Committed text, UTF-8, surrogate pairs already combined.
     std::function<void(const char* /*utf8*/, int /*byteCount*/)> onChar;
+    // Preferred cursor path: AYDevice maps this platform-neutral shape to the
+    // native cursor. onSetCursor remains as a compatibility fallback.
+    std::function<SystemCursorShape()> cursorShape;
     // WM_SETCURSOR: return true if the host applied a cursor (skip
     // DefWindowProc). Used so promoted DockCard title bars can show
     // Move/Hand hints — Gallery's primary HWND does this itself.

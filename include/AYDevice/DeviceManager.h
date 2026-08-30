@@ -8,8 +8,11 @@
 #include "AYDevice/TouchDevice.h"
 #include "AYDevice/TextInput.h"
 #include "AYDevice/InputMapping.h"
+#include "AYDevice/DeviceInputEvent.h"
 
 #include <array>
+#include <utility>
+#include <vector>
 
 namespace ayt::device {
 
@@ -67,12 +70,23 @@ public:
     // gamepads. Call once per frame (edges are relative to the previous call).
     void pollEvents();
 
+    // Ordered input listener seam. Listeners are notified during pollEvents,
+    // after AYDevice has translated the native event. Wheel events are
+    // delivered at the end of the same poll after duplicate Win32 sources are
+    // coalesced. The frame-local history is useful for tests/recording.
+    DeviceInputListenerId addInputListener(DeviceInputEventCallback callback);
+    void removeInputListener(DeviceInputListenerId id);
+    const std::vector<DeviceInputEvent>& inputEvents() const { return _inputEvents; }
+
     // Convenience action/axis queries (forward to the mapping).
     bool isActionPressed(const char* action) const { return _mapping.isActionPressed(action); }
     float getAxisValue(const char* axis) const { return _mapping.getAxisValue(axis); }
 
 private:
     void wireInputCallbacks();
+    void handleInputEvent(const DeviceInputEvent& event);
+    void dispatchInputEvent(const DeviceInputEvent& event);
+    void flushPendingWheelEvents();
     void initializePlatformGamepads();
     void shutdownPlatformGamepads();
     void openPlatformGamepad(int deviceIndex);
@@ -94,6 +108,13 @@ private:
     TouchDevice    _touch;
     TextInput      _textInput;
     InputMapping   _mapping;
+
+    DeviceInputListenerId _nextInputListenerId = 1;
+    std::vector<std::pair<DeviceInputListenerId, DeviceInputEventCallback>>
+        _inputListeners;
+    std::vector<DeviceInputEvent> _inputEvents;
+    std::vector<DeviceInputEvent> _pendingWheelEvents;
+    int _pendingWheelPriority = -1;
 };
 
 } // namespace ayt::device

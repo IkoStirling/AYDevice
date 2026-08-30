@@ -320,6 +320,39 @@ TEST_CASE(test_top_level_close_requested_callback) {
     windows.destroyWindow();
 }
 
+TEST_CASE(test_top_level_focus_callback_fires) {
+    WindowManager windows;
+    WindowCreateInfo info{};
+    info.hidden = true;
+    CHECK(windows.createWindow(info));
+
+    TopLevelWindowDesc desc{};
+    desc.visible = false;
+    void* handle = nullptr;
+    CHECK(windows.createTopLevelWindow(desc, handle));
+    CHECK(handle != nullptr);
+
+    int focusCount = 0;
+    bool lastFocused = false;
+    TopLevelWindowCallbacks callbacks{};
+    callbacks.onFocusChanged = [&](bool focused) {
+        ++focusCount;
+        lastFocused = focused;
+    };
+    windows.setTopLevelCallbacks(handle, callbacks);
+
+    const HWND hwnd = static_cast<HWND>(handle);
+    ::SendMessageW(hwnd, WM_SETFOCUS, 0, 0);
+    CHECK_INT_EQ(focusCount, 1);
+    CHECK(lastFocused);
+    ::SendMessageW(hwnd, WM_KILLFOCUS, 0, 0);
+    CHECK_INT_EQ(focusCount, 2);
+    CHECK_FALSE(lastFocused);
+
+    windows.destroyTopLevelWindow(handle);
+    windows.destroyWindow();
+}
+
 #endif // _WIN32
 
 TEST_SUITE_END

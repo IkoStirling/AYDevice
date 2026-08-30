@@ -24,6 +24,7 @@ set(HEADERS
     include/AYDevice/WindowManager.h
     include/AYDevice/DeviceManager.h
     include/AYDevice/InputTypes.h
+    include/AYDevice/DeviceInputEvent.h
     include/AYDevice/InputDevice.h
     include/AYDevice/KeyboardDevice.h
     include/AYDevice/MouseDevice.h

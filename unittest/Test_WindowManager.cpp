@@ -1,6 +1,15 @@
 #include "AYTest.h"
 #include "AYDevice/DeviceManager.h"
 
+#include <vector>
+
+#if defined(_WIN32)
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <Windows.h>
+#endif
+
 using namespace ayt::device;
 
 TEST_SUITE(AYDevice_WindowManager)
@@ -96,6 +105,85 @@ TEST_CASE(test_device_manager_initialize_poll) {
     CHECK(!devices.isInitialized());
     CHECK(!devices.window().isWindowValid());
 }
+
+#if defined(_WIN32)
+TEST_CASE(test_device_manager_emits_ordered_platform_neutral_input) {
+    DeviceManager devices;
+    DeviceConfig config{};
+    config.window.title = "Device input outlet test";
+    config.window.hidden = true;
+    CHECK(devices.initialize(config));
+
+    std::vector<DeviceInputEvent> received;
+    const DeviceInputListenerId listener = devices.addInputListener(
+        [&](const DeviceInputEvent& event) { received.push_back(event); });
+    CHECK(listener != 0);
+
+    const HWND hwnd = static_cast<HWND>(devices.window().getWindowHandle());
+    CHECK(hwnd != nullptr);
+    if (hwnd == nullptr) {
+        devices.shutdown();
+        return;
+    }
+
+    ::PostMessageW(hwnd, WM_MOUSEMOVE, 0, MAKELPARAM(12, 34));
+    ::PostMessageW(hwnd, WM_LBUTTONDOWN, MK_LBUTTON, MAKELPARAM(12, 34));
+    ::PostMessageW(hwnd, WM_LBUTTONUP, 0, MAKELPARAM(12, 34));
+    ::PostMessageW(hwnd, WM_KEYDOWN, 'A', 0);
+    ::PostMessageW(hwnd, WM_KEYDOWN, 'A', static_cast<LPARAM>(1u << 30));
+    ::PostMessageW(hwnd, WM_KEYUP, 'A', 0);
+    ::PostMessageW(hwnd, WM_CHAR, 'x', 0);
+
+    POINT wheelPoint{12, 34};
+    ::ClientToScreen(hwnd, &wheelPoint);
+    ::PostMessageW(hwnd, WM_MOUSEWHEEL, MAKEWPARAM(0, WHEEL_DELTA),
+                   MAKELPARAM(wheelPoint.x, wheelPoint.y));
+    devices.pollEvents();
+
+    int moveCount = 0;
+    int buttonCount = 0;
+    int keyCount = 0;
+    int repeatCount = 0;
+    int textCount = 0;
+    int wheelCount = 0;
+    for (const DeviceInputEvent& event : devices.inputEvents()) {
+        switch (event.type) {
+        case DeviceInputEventType::MouseMove: ++moveCount; break;
+        case DeviceInputEventType::MouseButton: ++buttonCount; break;
+        case DeviceInputEventType::Key:
+            ++keyCount;
+            if (event.repeat) ++repeatCount;
+            break;
+        case DeviceInputEventType::TextCommit:
+            if (event.text == "x") ++textCount;
+            break;
+        case DeviceInputEventType::MouseWheel:
+            if (event.wheelSource == MouseWheelSource::Standard
+                && event.deltaY == 1.0f) {
+                ++wheelCount;
+            }
+            break;
+        default: break;
+        }
+    }
+
+    CHECK_INT_EQ(moveCount, 1);
+    CHECK_INT_EQ(buttonCount, 2);
+    CHECK_INT_EQ(keyCount, 3);
+    CHECK_INT_EQ(repeatCount, 1);
+    CHECK_INT_EQ(textCount, 1);
+    CHECK_INT_EQ(wheelCount, 1);
+    CHECK_INT_EQ(received.size(), devices.inputEvents().size());
+
+    const size_t receivedBeforeDisconnect = received.size();
+    devices.removeInputListener(listener);
+    ::PostMessageW(hwnd, WM_KEYDOWN, 'B', 0);
+    devices.pollEvents();
+    CHECK_INT_EQ(received.size(), receivedBeforeDisconnect);
+
+    devices.shutdown();
+}
+#endif
 
 TEST_CASE(test_device_manager_focus_loss_releases_transient_input) {
     DeviceManager devices;

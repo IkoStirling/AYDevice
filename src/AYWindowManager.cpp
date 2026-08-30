@@ -18,6 +18,7 @@
 #    define NOMINMAX
 #  endif
 #  include <Windows.h>
+#  include <windowsx.h>
 #  include <imm.h>
 #endif
 
@@ -106,6 +107,7 @@ struct WindowManager::Impl {
     WindowResizeCallback onResize;
     WindowFocusCallback onFocus;
     WindowMessageCallback onMessage;
+    DeviceInputEventCallback onInputEvent;
     KeyCallback onKey;
     MouseButtonCallback onMouseButton;
     MouseMoveCallback onMouseMove;
@@ -117,9 +119,11 @@ struct WindowManager::Impl {
     CompositionCallback onComposition;
     bool touchEnabled = false;
     bool textInputEnabled = false;
+    bool compositionActive = false;
     bool focused = false;
     bool relativeMouseRequested = false;
     bool relativeMouseActive = false;
+    SystemCursorShape cursorShape = SystemCursorShape::Arrow;
 
 #if defined(_WIN32)
     HWND hwnd = nullptr;
@@ -134,6 +138,7 @@ struct WindowManager::Impl {
     bool rawInputRegistered = false;
     int cursorHideAdjustments = 0;
     unsigned pressedMouseButtons = 0;
+    bool mouseLeaveTracking = false;
 
     // PR-InputTrace: per-message-class trigger counters. Diagnostic only;
     // logged once at first trigger and every 60 thereafter to avoid
@@ -173,6 +178,22 @@ struct WindowManager::Impl {
 #if defined(_WIN32)
 namespace {
 
+HCURSOR nativeCursor(SystemCursorShape shape)
+{
+    LPCSTR resource = IDC_ARROW;
+    switch (shape) {
+    case SystemCursorShape::Hand:           resource = IDC_HAND; break;
+    case SystemCursorShape::Text:           resource = IDC_IBEAM; break;
+    case SystemCursorShape::SizeHorizontal: resource = IDC_SIZEWE; break;
+    case SystemCursorShape::SizeVertical:   resource = IDC_SIZENS; break;
+    case SystemCursorShape::SizeNwse:       resource = IDC_SIZENWSE; break;
+    case SystemCursorShape::SizeNesw:       resource = IDC_SIZENESW; break;
+    case SystemCursorShape::Move:           resource = IDC_SIZEALL; break;
+    case SystemCursorShape::Arrow:          resource = IDC_ARROW; break;
+    }
+    return ::LoadCursorA(nullptr, resource);
+}
+
 const wchar_t* kMainWindowClass = L"AYDeviceMainWindow";
 const wchar_t* kChildWindowClass = L"AYDeviceChildSurface";
 
@@ -195,6 +216,10 @@ bool registerMainWindowClass(HINSTANCE instance)
                 return userResult;
             }
             owner->processPlatformEvent(msg, wParam, lParam);
+            if (msg == WM_SETCURSOR && LOWORD(lParam) == HTCLIENT
+                && owner->applyCursor()) {
+                return TRUE;
+            }
         }
         if (msg == WM_CLOSE || msg == WM_DESTROY) {
             return 0;
@@ -376,6 +401,17 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         // will trigger DestroyWindow.
         break;
 
+    case WM_SETFOCUS:
+        if (cbs.onFocusChanged) {
+            cbs.onFocusChanged(true);
+        }
+        return 0;
+    case WM_KILLFOCUS:
+        if (cbs.onFocusChanged) {
+            cbs.onFocusChanged(false);
+        }
+        return 0;
+
     // ===== PR-Dock-TearOff input routing =====
     // All mouse coordinates below are client-relative floats, matching
     // the main-window callback contract. The host (editor child-window
@@ -486,8 +522,14 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         return 0;
     }
     case WM_SETCURSOR:
-        if (cbs.onSetCursor && cbs.onSetCursor()) {
-            return TRUE;
+        if (LOWORD(lParam) == HTCLIENT) {
+            if (cbs.cursorShape) {
+                ::SetCursor(nativeCursor(cbs.cursorShape()));
+                return TRUE;
+            }
+            if (cbs.onSetCursor && cbs.onSetCursor()) {
+                return TRUE;
+            }
         }
         break;
     }
@@ -803,6 +845,8 @@ void WindowManager::destroyWindow()
 #endif
 
     _impl->valid = false;
+    _impl->mouseLeaveTracking = false;
+    _impl->compositionActive = false;
 }
 
 bool WindowManager::isWindowValid() const
@@ -1013,6 +1057,13 @@ void WindowManager::setWindowMessageCallback(WindowMessageCallback callback)
     }
 }
 
+void WindowManager::setInputEventCallback(DeviceInputEventCallback callback)
+{
+    if (_impl) {
+        _impl->onInputEvent = std::move(callback);
+    }
+}
+
 void WindowManager::setKeyCallback(KeyCallback callback)
 {
     if (_impl) {
@@ -1127,6 +1178,65 @@ bool WindowManager::isRelativeMouseMode() const
 #if defined(AY_DEVICE_USE_SDL2) || defined(_WIN32)
     return _impl && _impl->relativeMouseRequested;
 #else
+    return false;
+#endif
+}
+
+bool WindowManager::isFocused() const
+{
+    return _impl && _impl->focused;
+}
+
+void WindowManager::setCursorShape(SystemCursorShape shape)
+{
+    if (!_impl) {
+        return;
+    }
+    _impl->cursorShape = shape;
+    applyCursor();
+}
+
+SystemCursorShape WindowManager::cursorShape() const
+{
+    return _impl ? _impl->cursorShape : SystemCursorShape::Arrow;
+}
+
+bool WindowManager::applyCursor() const
+{
+    if (!_impl || !_impl->valid || _impl->relativeMouseActive) {
+        return false;
+    }
+#if defined(AY_DEVICE_USE_SDL2)
+    // The SDL editor host is not enabled yet. Preserve SDL's default cursor
+    // until that backend owns a small SDL_SystemCursor cache.
+    return false;
+#elif defined(_WIN32)
+    if (_impl->hwnd == nullptr) {
+        return false;
+    }
+    ::SetCursor(nativeCursor(_impl->cursorShape));
+    return true;
+#else
+    return false;
+#endif
+}
+
+bool WindowManager::getCursorScreenPosition(int& x, int& y) const
+{
+#if defined(AY_DEVICE_USE_SDL2)
+    SDL_GetGlobalMouseState(&x, &y);
+    return true;
+#elif defined(_WIN32)
+    POINT point{};
+    if (!::GetCursorPos(&point)) {
+        return false;
+    }
+    x = static_cast<int>(point.x);
+    y = static_cast<int>(point.y);
+    return true;
+#else
+    (void)x;
+    (void)y;
     return false;
 #endif
 }
@@ -1570,6 +1680,13 @@ bool WindowManager::isTopLevelMaximized(void* handle) const
 #endif
 }
 
+void WindowManager::emitInputEvent(const DeviceInputEvent& event)
+{
+    if (_impl && _impl->onInputEvent) {
+        _impl->onInputEvent(event);
+    }
+}
+
 void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, std::intptr_t lParam)
 {
     if (!_impl) {
@@ -1596,66 +1713,170 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
 
     // ===== Keyboard =====
     case WM_KEYDOWN:
-    case WM_SYSKEYDOWN:
-        if (_impl->onKey) {
-            const bool repeat = (lParam & (1 << 30)) != 0;  // bit 30 = previous key state
-            if (!repeat) {
-                const KeyCode key = translateVirtualKey(wParam, lParam);
-                if (key != KeyCode::Unknown) {
-                    _impl->onKey(key, true);
+    case WM_SYSKEYDOWN: {
+        const bool repeat = (lParam & (1 << 30)) != 0;
+        const KeyCode key = translateVirtualKey(wParam, lParam);
+        if (key != KeyCode::Unknown) {
+            if (_impl->onKey && !repeat) {
+                _impl->onKey(key, true);
+            }
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::Key;
+            event.key = key;
+            event.pressed = true;
+            event.repeat = repeat;
+            emitInputEvent(event);
+        }
+        break;
+    }
+    case WM_KEYUP:
+    case WM_SYSKEYUP: {
+        const KeyCode key = translateVirtualKey(wParam, lParam);
+        if (key != KeyCode::Unknown) {
+            if (_impl->onKey) {
+                _impl->onKey(key, false);
+            }
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::Key;
+            event.key = key;
+            event.pressed = false;
+            emitInputEvent(event);
+        }
+        break;
+    }
+
+    // ===== Mouse move =====
+    case WM_MOUSEMOVE: {
+        if (!_impl->relativeMouseActive) {
+            const int x = static_cast<short>(LOWORD(lParam));
+            const int y = static_cast<short>(HIWORD(lParam));
+            if (_impl->onMouseMove) {
+                _impl->onMouseMove(static_cast<float>(x), static_cast<float>(y));
+            }
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::MouseMove;
+            event.x = static_cast<float>(x);
+            event.y = static_cast<float>(y);
+            emitInputEvent(event);
+
+            if (!_impl->mouseLeaveTracking && _impl->hwnd != nullptr) {
+                TRACKMOUSEEVENT tracking{};
+                tracking.cbSize = sizeof(tracking);
+                tracking.dwFlags = TME_LEAVE;
+                tracking.hwndTrack = _impl->hwnd;
+                if (::TrackMouseEvent(&tracking)) {
+                    _impl->mouseLeaveTracking = true;
                 }
             }
         }
         break;
-    case WM_KEYUP:
-    case WM_SYSKEYUP:
-        if (_impl->onKey) {
-            const KeyCode key = translateVirtualKey(wParam, lParam);
-            if (key != KeyCode::Unknown) {
-                _impl->onKey(key, false);
-            }
+    }
+    case WM_MOUSELEAVE: {
+        _impl->mouseLeaveTracking = false;
+        if (_impl->pressedMouseButtons == 0 && !_impl->relativeMouseActive) {
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::MouseLeave;
+            emitInputEvent(event);
         }
         break;
-
-    // ===== Mouse move =====
-    case WM_MOUSEMOVE:
-        if (_impl->onMouseMove && !_impl->relativeMouseActive) {
-            const int x = static_cast<short>(LOWORD(lParam));
-            const int y = static_cast<short>(HIWORD(lParam));
-            _impl->onMouseMove(static_cast<float>(x), static_cast<float>(y));
-        }
-        break;
+    }
 
     // ===== Mouse buttons =====
-    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDOWN: {
         handleMouseButton(MouseButton::Left, true);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Left;
+        event.pressed = true;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_LBUTTONUP:
+    }
+    case WM_LBUTTONUP: {
         handleMouseButton(MouseButton::Left, false);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Left;
+        event.pressed = false;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_RBUTTONDOWN:
+    }
+    case WM_RBUTTONDOWN: {
         handleMouseButton(MouseButton::Right, true);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Right;
+        event.pressed = true;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_RBUTTONUP:
+    }
+    case WM_RBUTTONUP: {
         handleMouseButton(MouseButton::Right, false);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Right;
+        event.pressed = false;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_MBUTTONDOWN:
+    }
+    case WM_MBUTTONDOWN: {
         handleMouseButton(MouseButton::Middle, true);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Middle;
+        event.pressed = true;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_MBUTTONUP:
+    }
+    case WM_MBUTTONUP: {
         handleMouseButton(MouseButton::Middle, false);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = MouseButton::Middle;
+        event.pressed = false;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_XBUTTONDOWN:
-        handleMouseButton((HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2,
-                          true);
+    }
+    case WM_XBUTTONDOWN: {
+        const MouseButton button =
+            (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
+        handleMouseButton(button, true);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = button;
+        event.pressed = true;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
-    case WM_XBUTTONUP:
-        handleMouseButton((HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2,
-                          false);
+    }
+    case WM_XBUTTONUP: {
+        const MouseButton button =
+            (HIWORD(wParam) == XBUTTON1) ? MouseButton::X1 : MouseButton::X2;
+        handleMouseButton(button, false);
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseButton;
+        event.mouseButton = button;
+        event.pressed = false;
+        event.x = static_cast<float>(static_cast<short>(LOWORD(lParam)));
+        event.y = static_cast<float>(static_cast<short>(HIWORD(lParam)));
+        emitInputEvent(event);
         break;
+    }
 
     // ===== Mouse wheel (normalized to notches) =====
-    case WM_MOUSEWHEEL:
+    case WM_MOUSEWHEEL: {
         if (ayDeviceTraceInputEnabled()) {
             ++_impl->mouseWheelTriggerCount;
             if (_impl->mouseWheelTriggerCount == 1 ||
@@ -1666,11 +1887,25 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                     _impl->mouseWheelTriggerCount, static_cast<int>(raw));
             }
         }
+        const short raw = static_cast<short>(HIWORD(wParam));
+        const float notches =
+            static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA);
         if (_impl->onMouseWheel) {
-            const short raw = static_cast<short>(HIWORD(wParam));
-            _impl->onMouseWheel(static_cast<float>(raw) / static_cast<float>(WHEEL_DELTA));
+            _impl->onMouseWheel(notches);
         }
+        POINT pt{GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+        if (_impl->hwnd != nullptr) {
+            ::ScreenToClient(_impl->hwnd, &pt);
+        }
+        DeviceInputEvent event{};
+        event.type = DeviceInputEventType::MouseWheel;
+        event.wheelSource = MouseWheelSource::Standard;
+        event.x = static_cast<float>(pt.x);
+        event.y = static_cast<float>(pt.y);
+        event.deltaY = notches;
+        emitInputEvent(event);
         break;
+    }
 
     // PR-InputTrace + L2 (2026-08-26): WM_POINTERUPDATE is what
     // Windows Precision trackpads (Dell/HP/Lenovo/Surface) deliver
@@ -1737,6 +1972,23 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                                     / static_cast<float>(WHEEL_DELTA));
             }
         }
+        if (dy != 0) {
+            POINT screenPt = pi.ptPixelLocation;
+            HWND under = ::WindowFromPoint(screenPt);
+            if (under == nullptr || under == _impl->hwnd
+                || ::IsChild(_impl->hwnd, under)) {
+                POINT clientPt = screenPt;
+                ::ScreenToClient(_impl->hwnd, &clientPt);
+                DeviceInputEvent event{};
+                event.type = DeviceInputEventType::MouseWheel;
+                event.wheelSource = MouseWheelSource::Pointer;
+                event.x = static_cast<float>(clientPt.x);
+                event.y = static_cast<float>(clientPt.y);
+                event.deltaY = -static_cast<float>(dy)
+                             / static_cast<float>(WHEEL_DELTA);
+                emitInputEvent(event);
+            }
+        }
         if (ayDeviceTraceInputEnabled()) {
             ++_impl->pointerTriggerCount;
             if (_impl->pointerTriggerCount == 1 ||
@@ -1801,10 +2053,18 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                               sizeof(RAWINPUTHEADER)) != dwSize) break;
         auto* raw = reinterpret_cast<RAWINPUT*>(buf.data());
         if (raw->header.dwType != RIM_TYPEMOUSE) break;
-        if (_impl->relativeMouseActive && _impl->onMouseDelta
+        if (_impl->relativeMouseActive
             && (raw->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-            _impl->onMouseDelta(static_cast<float>(raw->data.mouse.lLastX),
-                                static_cast<float>(raw->data.mouse.lLastY));
+            const float dx = static_cast<float>(raw->data.mouse.lLastX);
+            const float dy = static_cast<float>(raw->data.mouse.lLastY);
+            if (_impl->onMouseDelta) {
+                _impl->onMouseDelta(dx, dy);
+            }
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::MouseDelta;
+            event.deltaX = dx;
+            event.deltaY = dy;
+            emitInputEvent(event);
         }
         if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)) {
             if (ayDeviceTraceInputEnabled()) {
@@ -1825,12 +2085,28 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
             _impl->onMouseWheel(static_cast<float>(wheelDelta)
                                 / static_cast<float>(WHEEL_DELTA));
         }
+        if ((raw->data.mouse.usButtonFlags & RI_MOUSE_WHEEL)) {
+            POINT pt{};
+            if (::GetCursorPos(&pt) && _impl->hwnd != nullptr) {
+                ::ScreenToClient(_impl->hwnd, &pt);
+            }
+            const short wheelDelta =
+                static_cast<short>(raw->data.mouse.usButtonData);
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::MouseWheel;
+            event.wheelSource = MouseWheelSource::RawInput;
+            event.x = static_cast<float>(pt.x);
+            event.y = static_cast<float>(pt.y);
+            event.deltaY = static_cast<float>(wheelDelta)
+                         / static_cast<float>(WHEEL_DELTA);
+            emitInputEvent(event);
+        }
         break;
     }
 
     // ===== Touch (WM_TOUCH: decode contacts, map to client space) =====
     case WM_TOUCH:
-        if (_impl->onTouch && _impl->hwnd != nullptr) {
+        if ((_impl->onTouch || _impl->onInputEvent) && _impl->hwnd != nullptr) {
             const UINT count = LOWORD(wParam);
             if (count > 0) {
                 std::vector<TOUCHINPUT> inputs(count);
@@ -1847,10 +2123,19 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                         } else if (ti.dwFlags & TOUCHEVENTF_UP) {
                             phase = TouchPhase::Ended;
                         }
-                        _impl->onTouch(static_cast<int64_t>(ti.dwID),
-                                       static_cast<float>(pt.x),
-                                       static_cast<float>(pt.y),
-                                       phase);
+                        if (_impl->onTouch) {
+                            _impl->onTouch(static_cast<int64_t>(ti.dwID),
+                                           static_cast<float>(pt.x),
+                                           static_cast<float>(pt.y),
+                                           phase);
+                        }
+                        DeviceInputEvent event{};
+                        event.type = DeviceInputEventType::Touch;
+                        event.pointerId = static_cast<int64_t>(ti.dwID);
+                        event.x = static_cast<float>(pt.x);
+                        event.y = static_cast<float>(pt.y);
+                        event.touchPhase = phase;
+                        emitInputEvent(event);
                     }
                     CloseTouchInputHandle(handle);
                 }
@@ -1859,16 +2144,29 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
         break;
 
     // ===== Text: committed characters (UTF-16 -> UTF-8, surrogate-aware) =====
-    case WM_CHAR:
-        if (_impl->onChar) {
-            handleWmChar(static_cast<wchar_t>(wParam), _impl->onChar,
+    case WM_CHAR: {
+        if (_impl->onChar || _impl->onInputEvent) {
+            const CharCallback sink = [this](const char* utf8, int byteCount) {
+                if (_impl->onChar) {
+                    _impl->onChar(utf8, byteCount);
+                }
+                DeviceInputEvent event{};
+                event.type = DeviceInputEventType::TextCommit;
+                if (utf8 != nullptr && byteCount > 0) {
+                    event.text.assign(utf8, static_cast<size_t>(byteCount));
+                }
+                emitInputEvent(event);
+            };
+            handleWmChar(static_cast<wchar_t>(wParam), sink,
                          _impl->pendingHighSurrogate);
         }
         break;
+    }
 
     // ===== IME composition (in-progress candidate string) =====
     case WM_IME_COMPOSITION:
-        if (_impl->onComposition && _impl->hwnd != nullptr && (lParam & GCS_COMPSTR)) {
+        if ((_impl->onComposition || _impl->onInputEvent)
+            && _impl->hwnd != nullptr && (lParam & GCS_COMPSTR)) {
             HIMC himc = ImmGetContext(_impl->hwnd);
             if (himc != nullptr) {
                 const LONG bytes = ImmGetCompositionStringW(himc, GCS_COMPSTR, nullptr, 0);
@@ -1877,10 +2175,28 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
                     ImmGetCompositionStringW(himc, GCS_COMPSTR, wide.data(), bytes);
                     const LONG cursor = ImmGetCompositionStringW(himc, GCS_CURSORPOS, nullptr, 0);
                     const std::string utf8 = wideToUtf8(wide.data(), static_cast<int>(wide.size()));
-                    _impl->onComposition(utf8.c_str(), static_cast<int>(utf8.size()),
-                                         static_cast<int>(cursor));
+                    if (_impl->onComposition) {
+                        _impl->onComposition(utf8.c_str(), static_cast<int>(utf8.size()),
+                                             static_cast<int>(cursor));
+                    }
+                    DeviceInputEvent event{};
+                    event.type = _impl->compositionActive
+                        ? DeviceInputEventType::CompositionUpdate
+                        : DeviceInputEventType::CompositionStart;
+                    _impl->compositionActive = true;
+                    event.text = utf8;
+                    event.compositionCursor = static_cast<int>(cursor);
+                    emitInputEvent(event);
                 } else {
-                    _impl->onComposition("", 0, 0);
+                    if (_impl->onComposition) {
+                        _impl->onComposition("", 0, 0);
+                    }
+                    DeviceInputEvent event{};
+                    event.type = _impl->compositionActive
+                        ? DeviceInputEventType::CompositionUpdate
+                        : DeviceInputEventType::CompositionStart;
+                    _impl->compositionActive = true;
+                    emitInputEvent(event);
                 }
                 ImmReleaseContext(_impl->hwnd, himc);
             }
@@ -1890,6 +2206,12 @@ void WindowManager::processPlatformEvent(unsigned msg, std::uintptr_t wParam, st
     case WM_IME_ENDCOMPOSITION:
         if (_impl->onComposition) {
             _impl->onComposition(nullptr, -1, 0);  // sentinel: composition ended
+        }
+        {
+            _impl->compositionActive = false;
+            DeviceInputEvent event{};
+            event.type = DeviceInputEventType::CompositionEnd;
+            emitInputEvent(event);
         }
         break;
 

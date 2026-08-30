@@ -165,6 +165,73 @@ bool DeviceManager::initialize(const DeviceConfig& config)
     return true;
 }
 
+DeviceInputListenerId DeviceManager::addInputListener(
+    DeviceInputEventCallback callback)
+{
+    if (!callback) {
+        return 0;
+    }
+    const DeviceInputListenerId id = _nextInputListenerId++;
+    _inputListeners.emplace_back(id, std::move(callback));
+    return id;
+}
+
+void DeviceManager::removeInputListener(DeviceInputListenerId id)
+{
+    if (id == 0) {
+        return;
+    }
+    _inputListeners.erase(
+        std::remove_if(_inputListeners.begin(), _inputListeners.end(),
+                       [id](const auto& entry) { return entry.first == id; }),
+        _inputListeners.end());
+}
+
+void DeviceManager::dispatchInputEvent(const DeviceInputEvent& event)
+{
+    _inputEvents.push_back(event);
+
+    // A listener may disconnect itself while handling an event. Invoke a
+    // snapshot so iterator invalidation cannot corrupt the dispatch walk.
+    std::vector<DeviceInputEventCallback> listeners;
+    listeners.reserve(_inputListeners.size());
+    for (const auto& entry : _inputListeners) {
+        if (entry.second) {
+            listeners.push_back(entry.second);
+        }
+    }
+    for (const DeviceInputEventCallback& callback : listeners) {
+        callback(event);
+    }
+}
+
+void DeviceManager::handleInputEvent(const DeviceInputEvent& event)
+{
+    if (event.type != DeviceInputEventType::MouseWheel) {
+        dispatchInputEvent(event);
+        return;
+    }
+
+    const int priority = static_cast<int>(event.wheelSource);
+    if (priority < _pendingWheelPriority) {
+        return;
+    }
+    if (priority > _pendingWheelPriority) {
+        _pendingWheelEvents.clear();
+        _pendingWheelPriority = priority;
+    }
+    _pendingWheelEvents.push_back(event);
+}
+
+void DeviceManager::flushPendingWheelEvents()
+{
+    for (const DeviceInputEvent& event : _pendingWheelEvents) {
+        dispatchInputEvent(event);
+    }
+    _pendingWheelEvents.clear();
+    _pendingWheelPriority = -1;
+}
+
 void DeviceManager::wireInputCallbacks()
 {
     // L9 (2026-08-26): every std::function installed on
@@ -185,6 +252,9 @@ void DeviceManager::wireInputCallbacks()
     // If any future change makes _windowManager outlive this
     // DeviceManager, every lambda below becomes a use-after-free
     // and the fix is to std::weak_ptr-capture a shared owner.
+    _windowManager.setInputEventCallback(
+        [this](const DeviceInputEvent& event) { handleInputEvent(event); });
+
     if (_keyboardEnabled) {
         _windowManager.setKeyCallback([this](KeyCode key, bool pressed) {
             if (pressed) {
@@ -318,6 +388,9 @@ void DeviceManager::shutdown()
     }
     _touch.reset();
     _textInput.reset();
+    _inputEvents.clear();
+    _pendingWheelEvents.clear();
+    _pendingWheelPriority = -1;
     _keyboardEnabled = false;
     _mouseEnabled = false;
     _gamepadEnabled = false;
@@ -330,6 +403,10 @@ void DeviceManager::pollEvents()
     if (!_initialized) {
         return;
     }
+
+    _inputEvents.clear();
+    _pendingWheelEvents.clear();
+    _pendingWheelPriority = -1;
 
     // Advance edge state before draining events so just-pressed / deltas are
     // measured relative to the previous frame.
@@ -374,6 +451,12 @@ void DeviceManager::pollEvents()
             case SDL_WINDOWEVENT_FOCUS_LOST:
                 _windowManager.notifyFocused(false);
                 break;
+            case SDL_WINDOWEVENT_LEAVE: {
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::MouseLeave;
+                handleInputEvent(input);
+                break;
+            }
             case SDL_WINDOWEVENT_CLOSE:
                 _windowManager.notifyClosed();
                 break;
@@ -382,23 +465,42 @@ void DeviceManager::pollEvents()
             }
             break;
         case SDL_KEYDOWN:
-        case SDL_KEYUP:
+        case SDL_KEYUP: {
+            const KeyCode key = translateSdlKey(event.key.keysym.scancode);
             if (_keyboardEnabled && event.key.repeat == 0) {
-                const KeyCode key = translateSdlKey(event.key.keysym.scancode);
                 if (key != KeyCode::Unknown) {
                     if (event.type == SDL_KEYDOWN) _keyboard.onKeyDown(key);
                     else _keyboard.onKeyUp(key);
                 }
             }
+            if (key != KeyCode::Unknown) {
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::Key;
+                input.key = key;
+                input.pressed = event.type == SDL_KEYDOWN;
+                input.repeat = event.key.repeat != 0;
+                handleInputEvent(input);
+            }
             break;
+        }
         case SDL_MOUSEMOTION:
             if (_mouseEnabled) {
                 if (_windowManager.isRelativeMouseMode()) {
                     _mouse.onRelativeMove(static_cast<float>(event.motion.xrel),
                                           static_cast<float>(event.motion.yrel));
+                    DeviceInputEvent input{};
+                    input.type = DeviceInputEventType::MouseDelta;
+                    input.deltaX = static_cast<float>(event.motion.xrel);
+                    input.deltaY = static_cast<float>(event.motion.yrel);
+                    handleInputEvent(input);
                 } else {
                     _mouse.onMove(static_cast<float>(event.motion.x),
                                   static_cast<float>(event.motion.y));
+                    DeviceInputEvent input{};
+                    input.type = DeviceInputEventType::MouseMove;
+                    input.x = static_cast<float>(event.motion.x);
+                    input.y = static_cast<float>(event.motion.y);
+                    handleInputEvent(input);
                 }
             }
             break;
@@ -409,6 +511,13 @@ void DeviceManager::pollEvents()
                 if (translateSdlMouseButton(event.button.button, button)) {
                     if (event.type == SDL_MOUSEBUTTONDOWN) _mouse.onButtonDown(button);
                     else _mouse.onButtonUp(button);
+                    DeviceInputEvent input{};
+                    input.type = DeviceInputEventType::MouseButton;
+                    input.mouseButton = button;
+                    input.pressed = event.type == SDL_MOUSEBUTTONDOWN;
+                    input.x = static_cast<float>(event.button.x);
+                    input.y = static_cast<float>(event.button.y);
+                    handleInputEvent(input);
                 }
             }
             break;
@@ -423,6 +532,14 @@ void DeviceManager::pollEvents()
                     delta = -delta;
                 }
                 _mouse.onWheel(delta);
+                const Vector2 position = _mouse.getPosition();
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::MouseWheel;
+                input.wheelSource = MouseWheelSource::Standard;
+                input.x = position.x;
+                input.y = position.y;
+                input.deltaY = delta;
+                handleInputEvent(input);
             }
             break;
         case SDL_TEXTINPUT:
@@ -431,14 +548,32 @@ void DeviceManager::pollEvents()
             }
             _textInput.onChar(event.text.text,
                               static_cast<int>(std::strlen(event.text.text)));
+            {
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::TextCommit;
+                input.text = event.text.text;
+                handleInputEvent(input);
+            }
             break;
         case SDL_TEXTEDITING: {
             const int bytes = static_cast<int>(std::strlen(event.edit.text));
             if (bytes == 0) {
                 _textInput.endComposition();
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::CompositionEnd;
+                handleInputEvent(input);
             } else {
+                const bool wasComposing = _textInput.isComposing();
+                const int cursor = utf8ByteOffset(event.edit.text, event.edit.start);
                 _textInput.onComposition(event.edit.text, bytes,
-                                         utf8ByteOffset(event.edit.text, event.edit.start));
+                                         cursor);
+                DeviceInputEvent input{};
+                input.type = wasComposing
+                    ? DeviceInputEventType::CompositionUpdate
+                    : DeviceInputEventType::CompositionStart;
+                input.text.assign(event.edit.text, static_cast<size_t>(bytes));
+                input.compositionCursor = cursor;
+                handleInputEvent(input);
             }
             break;
         }
@@ -453,6 +588,13 @@ void DeviceManager::pollEvents()
                                event.tfinger.x * static_cast<float>(_windowManager.getWidth()),
                                event.tfinger.y * static_cast<float>(_windowManager.getHeight()),
                                phase);
+                DeviceInputEvent input{};
+                input.type = DeviceInputEventType::Touch;
+                input.pointerId = static_cast<int64_t>(event.tfinger.fingerId);
+                input.x = event.tfinger.x * static_cast<float>(_windowManager.getWidth());
+                input.y = event.tfinger.y * static_cast<float>(_windowManager.getHeight());
+                input.touchPhase = phase;
+                handleInputEvent(input);
             }
             break;
         case SDL_CONTROLLERDEVICEADDED:
@@ -473,6 +615,10 @@ void DeviceManager::pollEvents()
         DispatchMessageW(&msg);
     }
 #endif
+
+    // Wheel sources are intentionally delayed until the platform queue has
+    // drained so Standard/Pointer/RawInput duplicates can be resolved once.
+    flushPendingWheelEvents();
 
     // Gamepad state is sampled once per host frame (XInput or SDL controller).
     // SDL device events above only attach/detach controller handles.
