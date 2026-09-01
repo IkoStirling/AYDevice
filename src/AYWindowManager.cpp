@@ -1667,6 +1667,21 @@ bool WindowManager::toggleTopLevelMaximized(void* handle)
 #endif
 }
 
+bool WindowManager::minimizeTopLevelWindow(void* handle)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return false;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    ::ShowWindow(hwnd, SW_MINIMIZE);
+    return ::IsIconic(hwnd) != 0;
+#else
+    (void)handle;
+    return false;
+#endif
+}
+
 bool WindowManager::isTopLevelMaximized(void* handle) const
 {
 #if defined(_WIN32)

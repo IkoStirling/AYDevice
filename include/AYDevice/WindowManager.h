@@ -131,6 +131,7 @@ public:
     bool setTopLevelVisible(void* handle, bool visible);
 
     // Borderless+resizable child hosts: toggle OS maximize / restore.
+    bool minimizeTopLevelWindow(void* handle);
     bool toggleTopLevelMaximized(void* handle);
     bool isTopLevelMaximized(void* handle) const;
 
