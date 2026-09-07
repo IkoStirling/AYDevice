@@ -14,8 +14,8 @@
 #include "AYDevice/DeviceSubSystem.h"
 #include "AYTest.h"
 
-#include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/EventBus.h>
+#include <AYEventSystem/SubscriptionScope.h>
 #include <AYEventSystem/Events/DeviceEvents.h>
 #include <AYEventSystem/Events/WindowEvents.h>
 
@@ -67,7 +67,7 @@ TEST_CASE(Bridge_WindowResize_PostsOnSizeDelta) {
     // us assert "no resize posted on the seed frame" because the only
     // way to make a resize event fire is a notifyResized() that changes
     // the dimension.
-    ayt::app::EventBusHostScope probeScope;
+    ayt::event::SubscriptionScope probeScope;
     std::atomic<int> probeCount{0};
     probeScope.subscribe<BridgeProbeEvent>(
         [&probeCount](const BridgeProbeEvent&) { probeCount.fetch_add(1); });
@@ -79,7 +79,7 @@ TEST_CASE(Bridge_WindowResize_PostsOnSizeDelta) {
 
     std::atomic<int> resizeCount{0};
     int lastW = 0, lastH = 0;
-    ayt::app::EventBusHostScope scope;
+    ayt::event::SubscriptionScope scope;
     scope.subscribe<ayt::event::WindowResizeEvent>(
         [&resizeCount, &lastW, &lastH](const ayt::event::WindowResizeEvent& e) {
             resizeCount.fetch_add(1);
@@ -127,7 +127,7 @@ TEST_CASE(Bridge_WindowClose_PostsOnConsumeCloseRequested) {
     CHECK(sub.initialize());
 
     std::atomic<int> closeCount{0};
-    ayt::app::EventBusHostScope scope;
+    ayt::event::SubscriptionScope scope;
     scope.subscribe<ayt::event::WindowCloseEvent>(
         [&closeCount](const ayt::event::WindowCloseEvent&) {
             closeCount.fetch_add(1);
@@ -165,7 +165,7 @@ TEST_CASE(Bridge_WindowClose_PostsOnConsumeCloseRequested) {
 
 TEST_CASE(Bridge_Shutdown_DisconnectsHostScope) {
     // Host-scope cleanup parity check: DeviceSubSystem owns an
-    // EventBusHostScope (_events) 鈥?even though it's empty today (the
+    // SubscriptionScope (_events) 鈥?even though it's empty today (the
     // bridge is a pure producer), shutdown() must drain it idempotently
     // without touching the bus. Pin this so a future listener addition
     // (e.g. gamepad hot-plug watcher) plugs in via _events.subscribe<T>()
@@ -204,7 +204,7 @@ TEST_CASE(Bridge_DeviceAction_PostsOnJustPressed) {
 
     std::atomic<int> pressCount{0};
     std::atomic<int> releaseCount{0};
-    ayt::app::EventBusHostScope scope;
+    ayt::event::SubscriptionScope scope;
     scope.subscribe<ayt::event::DeviceActionEvent>(
         [&](const ayt::event::DeviceActionEvent& e) {
             if (e.pressed) {
@@ -246,4 +246,3 @@ TEST_CASE(Bridge_DeviceAction_PostsOnJustPressed) {
 TEST_SUITE_END
 
 } // namespace ayt::device::test
-

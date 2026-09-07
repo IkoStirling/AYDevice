@@ -2,7 +2,6 @@
 
 #include <AYGameLoop/SubSystemRegistry.h>
 
-#include <AYApplication/AppEventHost.h>
 #include <AYEventSystem/EventBus.h>
 #include <AYEventSystem/Events/DeviceEvents.h>
 #include <AYEventSystem/Events/WindowEvents.h>

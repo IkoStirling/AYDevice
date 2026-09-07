@@ -67,7 +67,7 @@ target_link_libraries(${PROJECT_NAME} PUBLIC AYCore)
 # Compiling AYDevice with /W4 -Wall -Wextra -Wpedantic generates
 # warnings for AYCore's headers transitively (because PUBLIC link
 # exposes them). If those flags were PUBLIC, every consumer
-# (AYDeviceConfig, AYDeviceSubSystem, AYApplication, Gallery)
+# (AYDeviceConfig, AYDeviceSubSystem, AYEventSystem, Gallery)
 # would inherit the same flags and start failing their own CI
 # builds because of AYDevice's choice. We deliberately keep
 # warnings PRIVATE so each target controls its own warning
@@ -118,23 +118,18 @@ add_library(AYDeviceSubSystem STATIC
 target_include_directories(AYDeviceSubSystem PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    # INT-03 (2026-07-20): Device->EventBus bridge. AYApplication/AppEventHost.h lives in
-    # AYApplication/interface — DeviceSubSystem consumes EventBusHostScope
-    # to host its post<WindowResize/Close> producer + any future listener
-    # ownership (Phase 4 §a8c8be9 lesson applied here too).
-    ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 
-target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop AY::Module
+target_link_libraries(AYDeviceSubSystem PUBLIC
+    AYDevice
+    AYEventSystem
+    AYGameLoop
+    AY::Module
     # AYScript link provides LogiaRuntimeBridge::InputProvider pure-virtual
     # interface that DeviceInputProvider derives from. AYScript's transitive
     # deps (AYReflect, sol2) don't leak because we only consume the input
     # seam — see AYScript/include/AYScript/ScriptRuntimeBridge.h:509.
-    PRIVATE AYScript
-    # INT-03 (2026-07-20): EventBusHostScope lives in AYApplication
-    # (interface/AYApplication/AppEventHost.h). Linking AYApplication pulls the scope
-    # type + (transitively) AYEventSystem, which is the bus Device posts to.
-    PRIVATE AYApplication)
+    PRIVATE AYScript)
 
 target_compile_options(AYDeviceSubSystem PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>: /W4>
