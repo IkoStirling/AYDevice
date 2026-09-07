@@ -53,6 +53,10 @@ struct TopLevelWindowDesc {
     int  y = -1;
     int  width  = 1024;
     int  height = 720;
+    // Optional native owner. An owned top-level remains modeless and keeps its
+    // own client/input surface, but follows the primary application window in
+    // task switching and minimize/restore behavior. It is not a WS_CHILD.
+    void* ownerHandle = nullptr;
     // PR-Dock-TearOff: whether the window is shown immediately after
     // creation. Default true; tests and hosts that want to prepare the
     // surface first (e.g. attach a render backend before the first

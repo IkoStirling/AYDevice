@@ -243,6 +243,31 @@ void* WindowManager::getWindowHandle() const {
 }
 ```
 
+### 3.4 多顶层工具窗（Editor）
+
+主窗口之外的 modeless 工具窗仍由同一个 `WindowManager` 创建和派发，应用层不直接安装第二套
+Win32 输入桥。`TopLevelWindowDesc::ownerHandle` 表示 OS owner：该窗口是独立顶层窗口而不是
+`WS_CHILD`，可以离开主窗口客户区，但会跟随 owner 的最小化/Z-order 和生命周期约束。
+
+```cpp
+TopLevelWindowDesc desc;
+desc.title = "AYUI Designer";
+desc.ownerHandle = windowManager.getWindowHandle();
+desc.width = 1360;
+desc.height = 820;
+
+void* tool = nullptr;
+windowManager.createTopLevelWindow(desc, tool);
+windowManager.setTopLevelCallbacks(tool, callbacks);
+windowManager.setTopLevelTitle(tool, "AYUI Designer - layout.ui.json *");
+windowManager.activateTopLevelWindow(tool);
+```
+
+每个顶层窗口使用 typed callbacks 接收 resize/close/focus、pointer、wheel、key、text 与 composition；
+上层按 handle 路由到对应 UIManager。关闭请求是通知而不是立即销毁，宿主可以先执行
+Save/Discard/Cancel，再在安全点调用 `destroyTopLevelWindow()`。AYEditor 的 Designer 使用该契约；
+AYDevice 不认识文档、DockCard 或 dirty 语义。
+
 ---
 
 ## 4. 输入设备接口

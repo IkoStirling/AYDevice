@@ -129,6 +129,8 @@ public:
     // Show/hide after create. Promote hosts create with visible=false,
     // paint the first GDI frame, then show — avoids a white flash.
     bool setTopLevelVisible(void* handle, bool visible);
+    bool activateTopLevelWindow(void* handle);
+    bool setTopLevelTitle(void* handle, const char* title);
 
     // Borderless+resizable child hosts: toggle OS maximize / restore.
     bool minimizeTopLevelWindow(void* handle);

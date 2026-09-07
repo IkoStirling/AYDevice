@@ -6,7 +6,8 @@ Device subsystem for AY Engine: **window + input** (single module). Input mappin
 
 ## Phase-1 (E3 skeleton)
 
-- `WindowManager` — native window create/destroy, size/title, resize/close/focus callbacks
+- `WindowManager` — primary and owned top-level native windows, create/destroy,
+  activation/title updates, and typed resize/close/focus/input callbacks
 - `createChildWindow()` — interim editor viewport child HWND (E2-interim path)
 - `DeviceManager` — owns `WindowManager`, `initialize` / `shutdown` / `pollEvents`
 
@@ -63,6 +64,10 @@ Values go through Config's string/float API — human-readable and layerable
 
 `DeviceSubSystem` (separate `AYDeviceSubSystem` target) wraps `DeviceManager` as
 a GameLoop `ISubSystem`:
+
+The default AYApplication Client host installs it through `DeviceRuntimeModule`
+(`AYDevice.Runtime`). The explicit `registerSubSystem()` API below remains the
+low-level compatibility path for standalone demos and tests.
 
 - Registered as **"Device"** at **priority 0** (initializes and updates first, so
   input is polled before gameplay/physics/UI read it), **Unscaled** time so input

@@ -1497,7 +1497,7 @@ bool WindowManager::createTopLevelWindow(const TopLevelWindowDesc& desc, void*& 
         yPos,
         wndW,
         wndH,
-        nullptr,                    // top-level: no parent
+        static_cast<HWND>(desc.ownerHandle), // optional owner; never WS_CHILD
         nullptr,                    // no menu
         _impl->instance,
         reinterpret_cast<LPVOID>(this));
@@ -1646,6 +1646,44 @@ bool WindowManager::setTopLevelVisible(void* handle, bool visible)
 #else
     (void)handle;
     (void)visible;
+    return false;
+#endif
+}
+
+bool WindowManager::activateTopLevelWindow(void* handle)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr) {
+        return false;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    if (!::IsWindow(hwnd)) return false;
+    if (::IsIconic(hwnd)) {
+        ::ShowWindow(hwnd, SW_RESTORE);
+    } else {
+        ::ShowWindow(hwnd, SW_SHOW);
+    }
+    ::BringWindowToTop(hwnd);
+    return ::SetForegroundWindow(hwnd) != FALSE || ::GetForegroundWindow() == hwnd;
+#else
+    (void)handle;
+    return false;
+#endif
+}
+
+bool WindowManager::setTopLevelTitle(void* handle, const char* title)
+{
+#if defined(_WIN32)
+    if (!_impl || handle == nullptr || title == nullptr) {
+        return false;
+    }
+    HWND hwnd = static_cast<HWND>(handle);
+    if (!::IsWindow(hwnd)) return false;
+    const std::wstring wideTitle = utf8ToWide(title);
+    return ::SetWindowTextW(hwnd, wideTitle.c_str()) != FALSE;
+#else
+    (void)handle;
+    (void)title;
     return false;
 #endif
 }

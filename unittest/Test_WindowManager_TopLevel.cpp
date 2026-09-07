@@ -18,6 +18,8 @@
 #include "AYTest.h"
 #include "AYDevice/WindowManager.h"
 
+#include <string>
+
 #if defined(_WIN32)
 #  ifndef WIN32_LEAN_AND_MEAN
 #    define WIN32_LEAN_AND_MEAN
@@ -90,6 +92,38 @@ TEST_CASE(test_top_level_create_destroy) {
     windows.destroyTopLevelWindow(h);
     CHECK_FALSE(IsWindow(hw));
 
+    windows.destroyWindow();
+}
+
+TEST_CASE(test_top_level_owner_and_runtime_title) {
+    WindowManager windows;
+    WindowCreateInfo info{};
+    info.title = "Primary owner";
+    info.width = 320;
+    info.height = 240;
+    info.hidden = true;
+    CHECK(windows.createWindow(info));
+    const HWND primary = static_cast<HWND>(windows.getWindowHandle());
+
+    TopLevelWindowDesc desc{};
+    desc.title = "Owned tool";
+    desc.ownerHandle = primary;
+    desc.width = 480;
+    desc.height = 320;
+    desc.visible = false;
+
+    void* handle = nullptr;
+    CHECK(windows.createTopLevelWindow(desc, handle));
+    const HWND tool = static_cast<HWND>(handle);
+    CHECK(::GetWindow(tool, GW_OWNER) == primary);
+    CHECK(windows.setTopLevelTitle(handle, "AYUI Designer - Dirty *"));
+
+    wchar_t title[128] = {};
+    CHECK(::GetWindowTextW(tool, title, 128) > 0);
+    CHECK(std::wstring(title) == L"AYUI Designer - Dirty *");
+
+    windows.destroyTopLevelWindow(handle);
+    CHECK_FALSE(::IsWindow(tool));
     windows.destroyWindow();
 }
 

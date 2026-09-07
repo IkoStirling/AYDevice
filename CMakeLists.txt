@@ -105,6 +105,8 @@ target_compile_options(AYDeviceConfig PRIVATE
 add_library(AYDeviceSubSystem STATIC
     src/AYDeviceSubSystem.cpp
     include/AYDevice/DeviceSubSystem.h
+    src/AYDeviceRuntimeModule.cpp
+    include/AYDevice/DeviceRuntimeModule.h
     # INT-02 (2026-07-15): DeviceInputProvider adapter — bridges
     # AYDevice InputMapping -> LogiaRuntimeBridge::InputProvider.
     # Lives in the SubSystem target (not AYDevice core) so the
@@ -123,7 +125,7 @@ target_include_directories(AYDeviceSubSystem PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/../AYApplication/interface
 )
 
-target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop
+target_link_libraries(AYDeviceSubSystem PUBLIC AYDevice AYGameLoop AY::Module
     # AYScript link provides LogiaRuntimeBridge::InputProvider pure-virtual
     # interface that DeviceInputProvider derives from. AYScript's transitive
     # deps (AYReflect, sol2) don't leak because we only consume the input
