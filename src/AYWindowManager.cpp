@@ -322,7 +322,11 @@ LRESULT CALLBACK TopLevelWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPar
         // L1 (2026-08-26): per-HWND surrogate state, inserted at create
         // so subsequent WM_CHAR lookups never miss a brand-new window.
         s_topLevelPendingHigh[hwnd] = 0;
-        return TRUE;
+        // DefWindowProc performs the standard non-client initialization,
+        // including preserving lpWindowName for GetWindowText/WM_GETTEXT.
+        // Returning TRUE directly creates a valid HWND but silently drops
+        // its initial title until a later WM_SETTEXT.
+        return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
 
     WindowManager* owner = windowFromHwnd(hwnd);
