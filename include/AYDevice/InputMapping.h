@@ -92,6 +92,15 @@ public:
     void bindActionGamepad(std::string_view action, std::span<const GamepadButton> buttons);
     void clearAction(std::string_view action);
 
+    /**
+     * @brief Reports whether any physical source bound to an Action is held.
+     * @param action Stable logical Action name from the active input profile.
+     * @return true while at least one bound key, button, or gamepad source is held.
+     * @framephase
+     * Device polling must complete before observing the current frame.
+     * @threading
+     * Call from the game/UI thread that owns DeviceManager polling.
+     */
     bool isActionPressed(std::string_view action) const;
     bool isActionJustPressed(std::string_view action) const;
     bool isActionJustReleased(std::string_view action) const;
@@ -125,6 +134,15 @@ public:
     // scale=1.5); the final clamp is the consumer's responsibility only
     // when they explicitly opt out via bindAxisRaw. In all other cases
     // the returned value is in [-1, 1].
+    /**
+     * @brief Reads the aggregated value of a logical input Axis.
+     * @param axis Stable logical Axis name from the active input profile.
+     * @return Sum of bound sources clamped to [-1, 1], or 0 when unbound.
+     * @framephase
+     * Device polling must complete before observing the current frame.
+     * @threading
+     * Call from the game/UI thread that owns DeviceManager polling.
+     */
     float getAxisValue(std::string_view axis) const;
 
     bool hasAction(std::string_view action) const;

@@ -86,12 +86,21 @@ config.window.title = "Game";
 DeviceSubSystem::setBootstrapConfig(config);   // before GameLoop::run()
 DeviceSubSystem::registerSubSystem();
 
-// Other subsystems fetch the polled devices:
-if (auto* dev = DeviceSubSystem::findRegistered()) {
-    bool jump = dev->manager().isActionPressed("Jump");
-    void* hwnd = dev->manager().window().getWindowHandle();  // -> RendererSubSystem
+// Gameplay resolves the same service in standalone Client and Editor hosts:
+#include "AYApplication/IEngineHost.h"
+if (auto* host = ayt::app::currentEngineHost()) {
+    if (auto* devices = ayt::app::deviceManager(*host);
+        devices && devices->isInitialized()) {
+        bool jump = devices->isActionPressed("Jump");
+        void* hwnd = devices->window().getWindowHandle();
+    }
 }
 ```
+
+`DeviceSubSystem::findRegistered()` remains available for low-level subsystem
+bridges and compatibility tests. New gameplay code should use the Host service
+so its acquisition path does not depend on whether Client or Editor owns the
+device runtime.
 
 Kept in a separate target so the core `AYDevice` library stays free of the
 `AYGameLoop` dependency — the editor uses `DeviceManager` directly without the loop.
