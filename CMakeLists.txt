@@ -102,18 +102,27 @@ target_compile_options(AYDeviceConfig PRIVATE
 # GameLoop integration: wraps DeviceManager as a "Device" ISubSystem. Kept in a
 # separate target so the core AYDevice library stays free of the AYGameLoop
 # dependency (the editor uses DeviceManager directly without the loop).
-add_library(AYDeviceSubSystem STATIC
+set(AY_DEVICE_SUBSYSTEM_SOURCES
     src/AYDeviceSubSystem.cpp
     include/AYDevice/DeviceSubSystem.h
     src/AYDeviceRuntimeModule.cpp
     include/AYDevice/DeviceRuntimeModule.h
+)
+
+if(NOT DEFINED AY_DEVICE_ENABLE_SCRIPT_BRIDGE)
+    set(AY_DEVICE_ENABLE_SCRIPT_BRIDGE ON)
+endif()
+if(AY_DEVICE_ENABLE_SCRIPT_BRIDGE)
     # INT-02 (2026-07-15): DeviceInputProvider adapter — bridges
     # AYDevice InputMapping -> LogiaRuntimeBridge::InputProvider.
     # Lives in the SubSystem target (not AYDevice core) so the
     # core library stays free of the AYScript dependency by design.
-    src/AYDeviceInputProvider.cpp
-    include/AYDevice/DeviceInputProvider.h
-)
+    list(APPEND AY_DEVICE_SUBSYSTEM_SOURCES
+        src/AYDeviceInputProvider.cpp
+        include/AYDevice/DeviceInputProvider.h)
+endif()
+
+add_library(AYDeviceSubSystem STATIC ${AY_DEVICE_SUBSYSTEM_SOURCES})
 
 target_include_directories(AYDeviceSubSystem PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
@@ -124,12 +133,14 @@ target_link_libraries(AYDeviceSubSystem PUBLIC
     AYDevice
     AYEventSystem
     AYGameLoop
-    AY::Module
+    AY::Module)
+if(AY_DEVICE_ENABLE_SCRIPT_BRIDGE)
     # AYScript link provides LogiaRuntimeBridge::InputProvider pure-virtual
     # interface that DeviceInputProvider derives from. AYScript's transitive
     # deps (AYReflect, sol2) don't leak because we only consume the input
     # seam — see AYScript/include/AYScript/ScriptRuntimeBridge.h:509.
-    PRIVATE AYScript)
+    target_link_libraries(AYDeviceSubSystem PRIVATE AYScript)
+endif()
 
 target_compile_options(AYDeviceSubSystem PRIVATE
     $<$<CXX_COMPILER_ID:MSVC>: /W4>

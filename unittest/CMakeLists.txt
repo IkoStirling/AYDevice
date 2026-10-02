@@ -19,7 +19,7 @@ add_executable(${TEST_NAME}
 
 if(AY_DEVICE_USE_SDL2)
     # Keep backend translation tests isolated from AYDevice_Test's larger
-    # GameLoop/EventSystem/AYScript dependency closure so SDL parity checks remain a
+    # GameLoop/EventSystem/optional AYScript dependency closure so SDL parity checks remain a
     # small incremental build.
     add_executable(AYDevice_SDL_Test TestMain.cpp Test_SdlInput.cpp)
     target_include_directories(AYDevice_SDL_Test PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
@@ -44,8 +44,8 @@ ay_add_test(${TEST_NAME})
 
 # L25 (2026-08-26): AYDevice_Test is intentionally heavy. It pulls
 # AYDeviceConfig (links AYConfig + transitive nlohmann_json),
-# AYDeviceSubSystem (links AYGameLoop + AYScript for the Logia
-# InputProvider seam + AYEventSystem for the EventBus bridge). This is what makes Test_DeviceSubSystem
+# AYDeviceSubSystem (links AYGameLoop + AYEventSystem, and AYScript only when
+# the Logia InputProvider seam is enabled). This is what makes Test_DeviceSubSystem
 # + Test_DeviceEventBridge + Test_InputProfileConfig possible. The
 # alternative — splitting each bridge into its own executable — was
 # considered and rejected: it duplicates TestMain.cpp N times and
@@ -53,13 +53,13 @@ ay_add_test(${TEST_NAME})
 
 # Fast backend/core regression target. It deliberately excludes Config and
 # SubSystem bridge tests so changing a platform backend does not rebuild the
-# GameLoop/EventSystem/AYScript dependency closure.
+# GameLoop/EventSystem/optional AYScript dependency closure.
 
 # L24 (2026-08-26): AYDevice_Core_Test scope. Backend input regression
 # (Keyboard / Mouse / Gamepad / Text / Touch + WindowManager + the
 # D5 top-level HWND path + raw-input wheel bridge parser). It does NOT
 # cover InputProfileConfig (needs AYConfig) or DeviceSubSystem
-# (needs AYGameLoop + AYScript + AYEventSystem). Use this target for
+# (needs AYGameLoop + AYEventSystem and optionally AYScript). Use this target for
 # the hot inner-loop during backend iterations; use AYDevice_Test for
 # full-suite verification.
 add_executable(AYDevice_Core_Test

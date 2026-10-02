@@ -65,6 +65,11 @@ Values go through Config's string/float API — human-readable and layerable
 `DeviceSubSystem` (separate `AYDeviceSubSystem` target) wraps `DeviceManager` as
 a GameLoop `ISubSystem`:
 
+The optional `DeviceInputProvider` adapter is compiled only when
+`AY_DEVICE_ENABLE_SCRIPT_BRIDGE` is enabled. The engine sets this switch from
+`AY_ENABLE_SCRIPT`, so a client build without scripting still has input polling
+and the Device subsystem without linking AYScript.
+
 The default AYApplication Client host installs it through `DeviceRuntimeModule`
 (`AYDevice.Runtime`). The explicit `registerSubSystem()` API below remains the
 low-level compatibility path for standalone demos and tests.

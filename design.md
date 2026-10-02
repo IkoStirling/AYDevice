@@ -1,6 +1,6 @@
 # AYDevice Design
 
-> **文档状态（2026-07-27）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）+ `DeviceSubSystem`（GameLoop 集成，独立 `AYDeviceSubSystem` 目标）。**下一薄能力**：`InputMapping` Action 按住时长（§6.3，未实现）。**Phase 4**：触控 `GestureRecognizer`（含 `LongPress`，§8.3）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
+> **文档状态（2026-10-03）**：Phase-1/2/3 已落地——窗口 + 键鼠 + `InputMapping`（Action/Axis）+ 手柄（XInput，含震动）+ 触控（`WM_TOUCH`）+ IME 文本（`WM_CHAR`/`WM_IME_COMPOSITION`）+ 可重绑定 `InputProfile`（AYConfig `[Input.*]` 存档桥接）+ `DeviceSubSystem`（GameLoop 集成，独立 `AYDeviceSubSystem` 目标）。`DeviceInputProvider` 仅在 `AY_DEVICE_ENABLE_SCRIPT_BRIDGE` 开启时编译；主工程将该开关映射到 `AY_ENABLE_SCRIPT`，无脚本的客户端仍可构建输入子系统。**下一薄能力**：`InputMapping` Action 按住时长（§6.3，未实现）。**Phase 4**：触控 `GestureRecognizer`（含 `LongPress`，§8.3）。**XR (OpenXR) 已移入未来引擎增强项**，见 §7。
 > **输入栈归属**：键盘/鼠标/手柄、`InputMapping`、Action 查询 **均在 AYDevice**；**不**单独建设 `AYInput` 模块。见 §1.3。
 
 ## 1. 概述
