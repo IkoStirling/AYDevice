@@ -1,10 +1,21 @@
 #include "AYDevice/InputMapping.h"
+#include <algorithm>
 
 #include "AYDevice/KeyboardDevice.h"
 #include "AYDevice/MouseDevice.h"
 #include "AYDevice/GamepadDevice.h"
 
 namespace ayt::device {
+InputMapping::DebugSnapshot InputMapping::debugSnapshot() const {
+    DebugSnapshot out;out.inputTick=_currentInputSimTick;
+    for(const auto& [name,binding]:_actions){if(out.actions.size()==256){++out.dropped;continue;}
+        out.actions.push_back({name,isActionPressed(name),isActionJustPressed(name),isActionJustReleased(name),isTickActionPressed(name),isTickActionJustPressed(name),isTickActionJustReleased(name),binding.keys.size(),binding.buttons.size(),binding.gamepadButtons.size()});}
+    for(const auto& [name,binding]:_axes){if(out.axes.size()==256){++out.dropped;continue;}
+        out.axes.push_back({name,getAxisValue(name),getTickAxisValue(name),binding.pairs.size(),binding.gamepadAxes.size()});}
+    std::sort(out.actions.begin(),out.actions.end(),[](const auto& a,const auto& b){return a.name<b.name;});
+    std::sort(out.axes.begin(),out.axes.end(),[](const auto& a,const auto& b){return a.name<b.name;});return out;
+}
+
 
 // L11+L12 (2026-08-26): heterogeneous map type is std::unordered_map
 // with std::hash<std::string_view> + std::equal_to<void>. MSVC's

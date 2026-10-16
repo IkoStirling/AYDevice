@@ -86,6 +86,11 @@ public:
     void setMouse(const MouseDevice* mouse) { _mouse = mouse; }
     void setGamepad(const GamepadDevice* gamepad) { _gamepad = gamepad; }
 
+    struct DebugAction { std::string name;bool held=false,pressed=false,released=false,tickHeld=false,tickPressed=false,tickReleased=false;size_t keys=0,mouseButtons=0,gamepadButtons=0; };
+    struct DebugAxis { std::string name;float value=0,tickValue=0;size_t keyboardSources=0,gamepadSources=0; };
+    struct DebugSnapshot {uint64_t inputTick=0;std::vector<DebugAction> actions;std::vector<DebugAxis> axes;size_t dropped=0;};
+    /// Owner-thread owned observation of bindings and frame/tick values; consumes no edges.
+    DebugSnapshot debugSnapshot() const;
     // ===== Action binding (binary press/release) =====
     void bindAction(std::string_view action, std::span<const KeyCode> keys);
     void bindActionMouse(std::string_view action, std::span<const MouseButton> buttons);

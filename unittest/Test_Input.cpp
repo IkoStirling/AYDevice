@@ -307,4 +307,14 @@ TEST_CASE(test_mapping_axis2d_overwrite_replaces_axes) {
     CHECK(v.y == 0.0f);
 }
 
+TEST_CASE(debug_snapshot_does_not_consume_frame_or_tick_edges) {
+    KeyboardDevice keyboard;InputMapping mapping;mapping.setKeyboard(&keyboard);
+    const KeyCode keys[]={KeyCode::Space};mapping.bindAction("Jump",keys);
+    keyboard.newFrame();keyboard.onKeyDown(KeyCode::Space);mapping.captureTickInputFrame(7);mapping.beginSimulationTick(7);
+    auto snapshot=mapping.debugSnapshot();CHECK(snapshot.inputTick==7);CHECK(snapshot.actions.size()==1);
+    if(!snapshot.actions.empty()){CHECK(snapshot.actions[0].pressed);CHECK(snapshot.actions[0].tickPressed);}
+    (void)mapping.debugSnapshot();CHECK(mapping.isActionJustPressed("Jump"));CHECK(mapping.isTickActionJustPressed("Jump"));
+    mapping.beginSimulationTick(8);CHECK(!mapping.isTickActionJustPressed("Jump"));
+    CHECK(!snapshot.actions.empty() && snapshot.actions[0].tickPressed);
+}
 TEST_SUITE_END

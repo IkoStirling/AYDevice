@@ -1163,3 +1163,9 @@ AYDevice/
 | 2026-07-11 | **GameLoop 集成落地**：`DeviceSubSystem`（"Device" 子系统，priority 0 / Unscaled；`initialize`→建窗+设备，`update`→`pollEvents`，`shutdown`→拆除）+ `setBootstrapConfig`/`registerSubSystem`/`findRegistered`（静态库安全显式注册，仿 `RendererSubSystem`）。独立 `AYDeviceSubSystem` 目标，核心库不引 AYGameLoop。 |
 | 2026-07-11 | **AYApplication + Renderer 打通**：`DeviceSubSystem::makeWindowProvider()` 返回 `std::function<bool(void*&,uint32_t&,uint32_t&)>`，经 `RendererSubSystem::setWindowProvider` 把窗口句柄喂给渲染器（两模块仅靠 function 签名互通，互不依赖对方头，绕开 Renderer C++17 / Device C++20 冲突）。Renderer 声明 `"Device"` 依赖保证初始化顺序。AYApplication `registerSubSystems()` 注册 DeviceSubSystem（`AYDeviceSubSystem` PRIVATE 链）。 |
 | 2026-07-27 | **§6.3 Action Hold 设计锁定（未实现）**：`getActionHoldTime` / `isActionHeld` / `isActionHoldJustTriggered`；阈值按查询传入，不强制短/长按二分。与 §8.3 触控 `GestureRecognizer::LongPress` 明确分工。架构图、§1.3 分期、Phase 3.5 清单同步；文档状态抬头更新。 |
+
+## Extended diagnostic observations (2026-10-15)
+
+InputMapping::debugSnapshot is an owner-thread owned view of sorted bindings, Action held/pressed/released and Axis values for frame and fixed-tick scopes. It reports source counts and input simulation tick, caps256 Actions/256 Axes with dropped count, and never polls devices, begins a tick or consumes edges. Editor observation uses the initialized Host DeviceManager.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.

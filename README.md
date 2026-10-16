@@ -190,3 +190,9 @@ use the smaller `AYDevice_Core_Test`; SDL2 builds additionally provide
 ## See also
 
 - [design.md](design.md) — full architecture; §10.4 editor integration timeline
+
+## Extended diagnostic observations (2026-10-15)
+
+InputMapping::debugSnapshot is an owner-thread owned view of sorted bindings, Action held/pressed/released and Axis values for frame and fixed-tick scopes. It reports source counts and input simulation tick, caps256 Actions/256 Axes with dropped count, and never polls devices, begins a tick or consumes edges. Editor observation uses the initialized Host DeviceManager.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
